@@ -1,0 +1,76 @@
+{
+  "skill_name": "retool-classic-apps-skill",
+  "evals": [
+    {
+      "id": 1,
+      "name": "build-expense-manager",
+      "description": "Build a new Retool app from a description \u2014 tests NEW workflow with crud + master-detail patterns",
+      "prompt": "Build me a Retool app for managing employee expenses. I need a table showing all expense reports with columns: employee name, amount, category, status, and date. Users should be able to create new expenses via a modal form, edit existing ones in a side panel, and approve/reject by changing status. Output a zip I can import into Retool.",
+      "input_dir": null,
+      "expected_output": "A complete Retool app with CRUD operations, modal form, side panel editing, and status management",
+      "files": [],
+      "expectations": [
+        "A main.rsx file exists in the app directory",
+        "A functions.rsx file exists with SQL queries",
+        "A Table component exists with columns for employee_name, amount, category, status, and date",
+        "A ModalFrame with Form for creating expenses exists",
+        "A SplitPaneFrame detail pane for editing exists",
+        "INSERT query with form binding exists",
+        "UPDATE_BY query with filterBy and success events exists",
+        "DELETE_BY query with requireConfirmation exists",
+        "Event chains: mutate queries trigger refresh of SELECT query on success",
+        "All mutation queries have runWhenModelUpdates={false}",
+        "validate_app.py passes with 0 FAIL",
+        "A FLAT zip file is produced (main.rsx at the archive root, no wrapper folder)"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "silent-import-debug",
+      "description": "Debug a silently failing Retool import \u2014 tests the silent-import model, killer detection, flat zip, probe advice",
+      "prompt": "Something's wrong with my Retool app import and I'm stuck. The app source is in the 'My CRM' folder. I zipped the folder ('My CRM.zip' is the zip I made) and imported it into Retool \u2014 Retool shows no error at all, but my app is unchanged, none of my edits are there. I tried twice. Diagnose what's going on, give me a zip that will actually import, and tell me how I can confirm the import really landed this time.",
+      "input_dir": "evals/fixtures/silent-import-debug",
+      "expected_output": "Diagnosis naming the _comment-on-View silent killer and the silent/replace import model; a fixed app; a FLAT zip; probe-verification advice",
+      "files": [],
+      "expectations": [
+        "The response states that Retool imports fail SILENTLY (a bad zip produces no error and no change) and that importing replaces the app in place rather than creating a new one",
+        "The _comment attribute is removed from the View element in src/detailPane.rsx (grep finds no _comment on any <View>)",
+        "validate_app.py was run and passes with 0 FAIL on the fixed app",
+        "The produced zip is FLAT: unzip -l shows main.rsx and metadata.json at the archive root, not inside a 'My CRM/' folder",
+        "The response recommends verifying the import with a probe/marker (e.g. a title or background change, or checking for a known new element) rather than assuming success"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "workspace-edit",
+      "description": "End-to-end column addition inside an app workspace \u2014 tests workspace conventions (migrations, lib/*.sql, doc gate, pack)",
+      "prompt": "This repo is the workspace for our Product Admin Retool app. Add a 'notes' free-text column to products, end to end: the database schema, the app's query, and a Notes column in the products table UI. Follow this workspace's conventions throughout, and leave everything ready for me to import.",
+      "input_dir": "evals/fixtures/workspace",
+      "expected_output": "An idempotent migration, SQL edited in app/lib/, table column added, data-model wiki page updated, flat zip packed into build/",
+      "files": [],
+      "expectations": [
+        "A new migration file exists in migrations/ following the YYYY-MM-DD-nn-slug.sql naming, containing idempotent DDL (ADD COLUMN IF NOT EXISTS), and no DDL was added anywhere else",
+        "The notes column was added by editing app/lib/*.sql \u2014 no inline SQL string was added to functions.rsx",
+        "No documentation, notes or scratch files were written inside app/",
+        "docs/wiki/data-model.md was updated to describe the new notes column in the same run",
+        "A flat zip exists in build/ (produced via ./retool.sh pack or equivalent), with main.rsx at the archive root, and validate_app.py passes on app/"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "status-filter-antipatterns",
+      "description": "Fix filtered-table/selectedRow and double-approve bugs, add bulk approve \u2014 tests sticky-row State, SQL guards, jsonb array pattern",
+      "prompt": "Our customer CRM Retool app (in this folder) has two bugs and needs one feature. Bug 1: with the status filter set to Pending, when I approve a customer from the detail pane the pane goes blank mid-action, and a couple of times the approval seems to have hit a different customer than the one I was looking at. Bug 2: if someone double-clicks Approve, the customer gets 100 bonus points instead of 50 \u2014 each approval is supposed to award 50 once. Feature: add a bulk Approve button that approves all selected customers in one go (our database is Postgres). Fix both bugs and add the feature, and give me an importable zip.",
+      "input_dir": "evals/fixtures/status-filter-crm",
+      "expected_output": "Approve path reads a State snapshot; approve SQL guarded in WHERE; bulk approve uses the jsonb array pattern; validator passes; flat zip",
+      "files": [],
+      "expectations": [
+        "The single-row approve path reads a State snapshot captured on row select \u2014 approveCustomer.sql no longer references customersTable.selectedRow",
+        "The approve SQL carries a status guard in its WHERE clause (e.g. AND status <> 'approved' or status = 'pending') so a double-click is a 0-row no-op \u2014 the fix is not only disabling the button",
+        "The bulk approve SQL expands the id array via jsonb (JSON.stringify + jsonb_array_elements_text or equivalent) and does NOT use = ANY({{ ... }}) or IN ({{ ... }}) directly on the array",
+        "The status filter Select did not gain an explicit change-event trigger on selectCustomers (the query already references it reactively)",
+        "validate_app.py passes with 0 FAIL and a flat zip is produced"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+<App>
+  <Include src="./functions.rsx" />
+  <Include src="./src/detailPane.rsx" />
+  <Frame
+    id="$main"
+    isHiddenOnDesktop={false}
+    isHiddenOnMobile={false}
+    padding="8px 12px"
+    paddingType="normal"
+    sticky={false}
+    type="main"
+  >
+    <Text
+      id="pageTitle"
+      marginType="normal"
+      value="### Customers"
+      verticalAlign="center"
+    />
+    <Select
+      id="statusFilter"
+      emptyMessage="No options"
+      label=""
+      marginType="normal"
+      placeholder="Filter by status">
+      <Option id="e0a01" value="pending" label="Pending" />
+      <Option id="e0a02" value="approved" label="Approved" />
+      <Option id="e0a03" value="" label="All" />
+    </Select>
+    <Button
+      id="setupGuideBtn"
+      marginType="normal"
+      text="Setup Guide"
+    >
+      <Event
+        id="fb2c3d4e"
+        event="click"
+        method="show"
+        params={{}}
+        pluginId="setupGuideModal"
+        type="widget"
+        waitMs="0"
+        waitType="debounce"
+      />
+    </Button>
+    <Table
+      id="customersTable"
+      cellSelection="none"
+      data="{{ Array.isArray(selectCustomers.data) ? selectCustomers.data : [{ id: 1, name: 'Alice Johnson', email: 'alice@example.com', status: 'active', created_at: '2024-01-10' }, { id: 2, name: 'Bob Smith', email: 'bob@example.com', status: 'active', created_at: '2024-02-15' }, { id: 3, name: 'Carol Davis', email: 'carol@example.com', status: 'inactive', created_at: '2024-03-20' }] }}"
+      defaultSelectedRow={{ mode: "index", indexType: "display", index: 0 }}
+      heightType="auto"
+      primaryKeyColumnId="c01a1"
+      rowHeight="medium"
+      rowSelection="single"
+      searchMode="caseInsensitive"
+      showBorder={true}
+      showFooter={true}
+      showHeader={true}
+      templatePageSize={20}
+    >
+      <Column
+        id="c01a1"
+        alignment="left"
+        editable={false}
+        format="string"
+        key="id"
+        label="ID"
+        position="center"
+        size={60}
+      />
+      <Column
+        id="c02b2"
+        alignment="left"
+        format="string"
+        key="name"
+        label="Name"
+        position="center"
+        size={180}
+      />
+      <Column
+        id="c03c3"
+        alignment="left"
+        format="string"
+        key="email"
+        label="Email"
+        position="center"
+        size={220}
+      />
+      <Column
+        id="c04d4"
+        alignment="left"
+        format="tag"
+        formatOptions={{ automaticColors: true }}
+        key="status"
+        label="Status"
+        position="center"
+        size={100}
+      />
+      <Column
+        id="c05e5"
+        alignment="left"
+        format="datetime"
+        key="created_at"
+        label="Joined"
+        position="center"
+        size={140}
+      />
+    </Table>
+  </Frame>
+  <ModalFrame
+    id="setupGuideModal"
+    hidden={false}
+    hideOnEscape={true}
+    overlayInteraction="close"
+    showOverlay={true}
+    size="medium"
+  >
+    <Header>
+      <Text
+        id="setupGuideTitle"
+        marginType="normal"
+        value="## 🚀 Setup Guide"
+        verticalAlign="center"
+      />
+    </Header>
+    <Body>
+      <Text
+        id="setupGuideText"
+        marginType="normal"
+        value="{{ 'Welcome! This app is loaded with **sample data** so you can click around and explore right away.\n\nWhen you are ready to wire up your real database, follow these steps:\n\n1. 🔌 **Connect your database** — Go to *Resources* in Retool and add your DB\n2. 🔄 **Update queries** — Open each query in the bottom panel and switch the Resource\n3. 📝 **Update table/column names** — Edit the SQL in each query to match your schema\n4. 🧹 **Remove mock data** — In each Table/Select, remove the mock array fallback from the data attribute\n5. 🗑️ **Delete this modal** — Remove this Setup Guide and the setupGuideBtn button\n\n✅ You are all set — happy building!' }}"
+        verticalAlign="top"
+      />
+    </Body>
+  </ModalFrame>
+</App>
