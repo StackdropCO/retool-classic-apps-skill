@@ -731,6 +731,74 @@ def validate_app(app_dir):
     else:
         vr.add('PASS', 'Mutations have runWhenModelUpdates=false')
 
+    # -----------------------------------------------------------------------
+    # 20. include() / <Include src> targets exist
+    # Added at Forge vendoring (2026-08-31): add_query --sql-file once emitted an
+    # include("./lib/x.sql") with no file behind it, and nothing here noticed. A dangling
+    # include is a broken app the importer may accept and the app then fails at runtime,
+    # or worse, silently no-ops the import; either way the reference must resolve.
+    # -----------------------------------------------------------------------
+    include_errors = []
+    for filepath in rsx_files:
+        content = open(filepath, encoding='utf-8').read()
+        rel = os.path.relpath(filepath, app_dir)
+        for m in re.finditer(r'include\("\.\/([^"]+)"', content):
+            target = os.path.join(app_dir, m.group(1))
+            if not os.path.isfile(target):
+                include_errors.append(f'{rel}: include("./{m.group(1)}") but that file does not exist')
+        for m in re.finditer(r'<Include\s+src="\.\/([^"]+)"', content):
+            target = os.path.join(app_dir, m.group(1))
+            if not os.path.isfile(target):
+                include_errors.append(f'{rel}: <Include src="./{m.group(1)}"> but that file does not exist')
+
+    if include_errors:
+        vr.add('FAIL', f'Dangling include targets: {"; ".join(include_errors)}')
+    else:
+        vr.add('PASS', 'All include() and <Include> targets exist')
+
+    # -----------------------------------------------------------------------
+    # 21. Grid overlaps (WARN, not FAIL)
+    # Two components sharing rows AND columns in one scope render stacked. Retool imports
+    # such an app fine, so this cannot be a FAIL, but it is never what anyone designed:
+    # every case found in the wild was the toolbar-button rule (height 0.8, row +0.2)
+    # not being followed. WARN names the pair so a human decides.
+    # -----------------------------------------------------------------------
+    overlap_warnings = []
+    try:
+        with open(os.path.join(app_dir, '.positions.json'), encoding='utf-8') as f:
+            all_positions = json.load(f)
+    except Exception:
+        all_positions = {}
+    # Overlay frames (ModalFrame/DrawerFrame/SplitPaneFrame/SidebarFrame) carry a position
+    # entry in the wild but do not occupy grid space in the plane they sit in, so they are
+    # excluded, or every app with a modal would warn.
+    overlay_ids = set()
+    for filepath in rsx_files:
+        content = open(filepath, encoding='utf-8').read()
+        for m in re.finditer(r'<(?:ModalFrame|DrawerFrame|SplitPaneFrame|SidebarFrame)\b[^>]*?\bid="([^"]+)"', content, re.S):
+            overlay_ids.add(m.group(1))
+    scopes = {}
+    for comp_id, pos in all_positions.items():
+        if not isinstance(pos, dict) or comp_id in overlay_ids:
+            continue
+        scope = (pos.get('container', ''), pos.get('subcontainer', ''), pos.get('rowGroup', ''))
+        scopes.setdefault(scope, []).append((comp_id, pos))
+    for scope, entries in scopes.items():
+        for i in range(len(entries)):
+            for j in range(i + 1, len(entries)):
+                (id_a, a), (id_b, b) = entries[i], entries[j]
+                ra0, ra1 = float(a.get('row', 0)), float(a.get('row', 0)) + float(a.get('height', 0))
+                rb0, rb1 = float(b.get('row', 0)), float(b.get('row', 0)) + float(b.get('height', 0))
+                ca0, ca1 = float(a.get('col', 0)), float(a.get('col', 0)) + float(a.get('width', 12))
+                cb0, cb1 = float(b.get('col', 0)), float(b.get('col', 0)) + float(b.get('width', 12))
+                if ra0 < rb1 and rb0 < ra1 and ca0 < cb1 and cb0 < ca1:
+                    overlap_warnings.append(f'{id_a} overlaps {id_b} (rows [{ra0},{ra1}) x [{rb0},{rb1}), cols [{ca0},{ca1}) x [{cb0},{cb1}))')
+
+    if overlap_warnings:
+        vr.add('WARN', f'Grid overlaps (renders stacked; usually a missed toolbar-button offset): {"; ".join(overlap_warnings[:6])}')
+    else:
+        vr.add('PASS', 'No grid overlaps')
+
     return app_name, vr
 
 

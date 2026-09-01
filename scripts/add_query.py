@@ -152,7 +152,7 @@ def build_sql_query(args):
             attrs.append(('query', query_attr))
         else:
             attrs.append(('query', f'"{query_attr}"'))
-        attrs.append(('resourceName', '"REPLACE_WITH_RESOURCE_UUID"'))
+        attrs.append(('resourceName', f'"{args.resource_name}"' if getattr(args, 'resource_name', None) else '"REPLACE_WITH_RESOURCE_UUID"'))
         attrs.append(('resourceTypeOverride', '""'))
         attrs.append(('warningCodes', '{[]}'))
     else:
@@ -163,7 +163,7 @@ def build_sql_query(args):
         if action_type in ("DELETE_BY",) and args.confirm:
             attrs.append(('requireConfirmation', '{true}'))
 
-        attrs.append(('resourceName', '"REPLACE_WITH_RESOURCE_UUID"'))
+        attrs.append(('resourceName', f'"{args.resource_name}"' if getattr(args, 'resource_name', None) else '"REPLACE_WITH_RESOURCE_UUID"'))
         attrs.append(('resourceTypeOverride', '""'))
         attrs.append(('runWhenModelUpdates', '{false}'))
         if args.table:
@@ -337,21 +337,26 @@ def main():
 
     # Create lib/ files if requested
     lib_dir = os.path.join(app_dir, "lib")
-    if args.sql_file and args.sql:
+    # The include() above is emitted whenever the flag is set, so the file must exist
+    # whenever the flag is set: emitting include("./lib/x.sql") with no file was a silent
+    # dangling reference the validator could not see (Forge vendoring audit, 2026-08-31).
+    if args.sql_file:
         os.makedirs(lib_dir, exist_ok=True)
         sql_path = os.path.join(lib_dir, f"{args.id}.sql")
+        body = args.sql if args.sql else f"-- TODO: write the SQL for {args.id}\nSELECT 1\n"
         with open(sql_path, "w") as f:
-            f.write(args.sql)
-            if not args.sql.endswith("\n"):
+            f.write(body)
+            if not body.endswith("\n"):
                 f.write("\n")
-        print(f"Created {sql_path}")
+        print(f"Created {sql_path}" + ("" if args.sql else " (placeholder body: fill it in)"))
 
-    if args.js_file and args.js_body:
+    if args.js_file:
         os.makedirs(lib_dir, exist_ok=True)
         js_path = os.path.join(lib_dir, f"{args.id}.js")
+        body = args.js_body if args.js_body else f"// TODO: write the body for {args.id}\nreturn null;\n"
         with open(js_path, "w") as f:
-            f.write(args.js_body)
-            if not args.js_body.endswith("\n"):
+            f.write(body)
+            if not body.endswith("\n"):
                 f.write("\n")
         print(f"Created {js_path}")
 
