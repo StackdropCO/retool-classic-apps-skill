@@ -336,7 +336,7 @@ Workaround for inputs that need to live in the header (e.g., a toggle beside the
   <ToolbarButton id="hex2" icon="bold/interface-text-formatting-filter-2" label="Filter" type="filter" />
 </Table>
 
-<!-- Computed column value: referenceId + valueOverride, NOT key + mapper -->
+// Computed column value: referenceId + valueOverride, NOT key + mapper
 <Column id="hex5" format="string" label="Count"
   referenceId="count"
   valueOverride="{{ Object.values(currentSourceRow?.var_mapper || {}).length + ' (' + /* ... */ + ')' }}"
@@ -366,7 +366,7 @@ Workaround for inputs that need to live in the header (e.g., a toggle beside the
 <Button id="btn" text="Cancel" styleVariant="outline" marginType="normal">
   <Event id="hex8" event="click" method="hide" params={{}} pluginId="modalId" type="widget" waitMs="0" waitType="debounce" />
 </Button>
-<!-- Toolbar button (alongside filter inputs): -->
+// Toolbar button (alongside filter inputs):
 <Button id="addBtn" heightType="auto" iconBefore="bold/interface-add-1" text="Add" marginType="normal" />
 ```
 
@@ -479,12 +479,12 @@ Reactive computed value (a.k.a. "transformer" in the Retool UI). Uses `funcBody`
 
 ### FirebaseQuery
 ```jsx
-<!-- Read documents -->
+// Read documents
 <FirebaseQuery id="documents" actionType="queryFirestore" firebaseService="firestore"
   firestoreCollection="my-collection" limit="25" useRawCollectionId={true}
   resourceDisplayName="firebase" resourceName="REPLACE_WITH_RESOURCE" />
 
-<!-- Create/Set document -->
+// Create/Set document
 <FirebaseQuery id="insertDoc" actionType="setFirestore" firebaseService="firestore"
   firestoreCollection="{{ collection.value }}" value="{{ jsonEditor.value }}"
   useRawCollectionId={true} runWhenModelUpdates={false}
@@ -492,13 +492,13 @@ Reactive computed value (a.k.a. "transformer" in the Retool UI). Uses `funcBody`
   <Event id="hex8" event="success" method="trigger" pluginId="documents" type="datasource" waitMs="0" waitType="debounce" />
 </FirebaseQuery>
 
-<!-- Update document -->
+// Update document
 <FirebaseQuery id="updateDoc" actionType="updateFirestore" firebaseService="firestore"
   firestoreCollection="{{ collection.value }}" docId="{{ table.selectedRow.data._id }}"
   value="{{ jsonEditor.value }}" useRawCollectionId={true} runWhenModelUpdates={false}
   resourceDisplayName="firebase" resourceName="REPLACE_WITH_RESOURCE" />
 
-<!-- Delete document (with confirmation) -->
+// Delete document (with confirmation)
 <FirebaseQuery id="deleteDoc" actionType="deleteFirestore" firebaseService="firestore"
   firestoreCollection="{{ collection.value }}" docId="{{ table.selectedRow.data._id }}"
   requireConfirmation={true} confirmationMessage="Delete this document?"
@@ -575,7 +575,7 @@ Reactive computed value (a.k.a. "transformer" in the Retool UI). Uses `funcBody`
 <BoundingBox id="tagger" boundingBoxes="{{ row.labels }}" imageUrl="{{ row.image_url }}" />
 <S3Uploader id="uploader" events={[{ ordered: [{ event: "upload" }, { type: "datasource" }, { method: "trigger" }, { pluginId: "refreshFiles" }, { params: { ordered: [] } }, { waitType: "debounce" }, { waitMs: "0" }, { id: "hex8" }] }]} />
 
-<!-- Tags: use value= (NOT data=), plus defaultBackground: "automatic" for auto-colored pills -->
+// Tags: use value= (NOT data=), plus defaultBackground: "automatic" for auto-colored pills
 <Tags id="keyTags" allowWrap={true}
   style={{ ordered: [{ defaultBackground: "automatic" }] }}
   value="{{ Object.keys(EditForm.initialData?.var_mapper || {}).sort() }}" />
@@ -647,11 +647,11 @@ The inline script reads `currentSourceRow` (and `i`, the display index) from its
 
 ### State Management
 ```jsx
-<!-- Declare in GlobalFunctions -->
+// Declare in GlobalFunctions
 <State id="editingRowId" value="{{ null }}" />
 <State id="isBulkUpdate" value="{{ false }}" />
 
-<!-- Set via Event -->
+// Set via Event
 <Event id="hex8" event="click" method="setValue"
   params={{ ordered: [["value", true]] }} pluginId="isBulkUpdate" type="state" waitMs="0" waitType="debounce" />
 ```
@@ -685,10 +685,10 @@ resultsTable.setFilterStack(stack);
 Use `Array.isArray()` in `data` attributes to provide inline sample data when no database is connected:
 
 ```jsx
-<!-- Table with mock data fallback -->
+// Table with mock data fallback
 <Table id="tbl" data="{{ Array.isArray(selectItems.data) ? selectItems.data : [{ id: 1, name: 'Sample Item', status: 'active' }, { id: 2, name: 'Another Item', status: 'draft' }] }}" ...>
 
-<!-- Select with mock data fallback -->
+// Select with mock data fallback
 <Select id="sel" data="{{ Array.isArray(selectCategories.data) ? selectCategories.data : [{ id: 1, name: 'Category A' }, { id: 2, name: 'Category B' }] }}" itemMode="mapped" labels="{{ item.name }}" values="{{ item.id }}" ...>
 ```
 
