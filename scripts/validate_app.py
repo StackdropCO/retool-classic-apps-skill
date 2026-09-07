@@ -740,16 +740,18 @@ def validate_app(app_dir):
     # -----------------------------------------------------------------------
     include_errors = []
     for filepath in rsx_files:
-        content = open(filepath, encoding='utf-8').read()
+        with open(filepath, encoding='utf-8') as f:
+            content = f.read()
         rel = os.path.relpath(filepath, app_dir)
-        for m in re.finditer(r'include\("\.\/([^"]+)"', content):
-            target = os.path.join(app_dir, m.group(1))
+        containing_dir = os.path.dirname(filepath)
+        for m in re.finditer(r'include\("((?:\.\.?\/)[^"]+)"', content):
+            target = os.path.normpath(os.path.join(containing_dir, m.group(1)))
             if not os.path.isfile(target):
-                include_errors.append(f'{rel}: include("./{m.group(1)}") but that file does not exist')
-        for m in re.finditer(r'<Include\s+src="\.\/([^"]+)"', content):
-            target = os.path.join(app_dir, m.group(1))
+                include_errors.append(f'{rel}: include("{m.group(1)}") but that file does not exist')
+        for m in re.finditer(r'<Include\s+src="((?:\.\.?\/)[^"]+)"', content):
+            target = os.path.normpath(os.path.join(containing_dir, m.group(1)))
             if not os.path.isfile(target):
-                include_errors.append(f'{rel}: <Include src="./{m.group(1)}"> but that file does not exist')
+                include_errors.append(f'{rel}: <Include src="{m.group(1)}"> but that file does not exist')
 
     if include_errors:
         vr.add('FAIL', f'Dangling include targets: {"; ".join(include_errors)}')
@@ -774,7 +776,8 @@ def validate_app(app_dir):
     # excluded, or every app with a modal would warn.
     overlay_ids = set()
     for filepath in rsx_files:
-        content = open(filepath, encoding='utf-8').read()
+        with open(filepath, encoding='utf-8') as f:
+            content = f.read()
         for m in re.finditer(r'<(?:ModalFrame|DrawerFrame|SplitPaneFrame|SidebarFrame)\b[^>]*?\bid="([^"]+)"', content, re.S):
             overlay_ids.add(m.group(1))
     scopes = {}
@@ -791,7 +794,9 @@ def validate_app(app_dir):
                 rb0, rb1 = float(b.get('row', 0)), float(b.get('row', 0)) + float(b.get('height', 0))
                 ca0, ca1 = float(a.get('col', 0)), float(a.get('col', 0)) + float(a.get('width', 12))
                 cb0, cb1 = float(b.get('col', 0)), float(b.get('col', 0)) + float(b.get('width', 12))
-                if ra0 < rb1 and rb0 < ra1 and ca0 < cb1 and cb0 < ca1:
+                epsilon = 1e-9
+                if (ra0 < rb1 - epsilon and rb0 < ra1 - epsilon
+                        and ca0 < cb1 - epsilon and cb0 < ca1 - epsilon):
                     overlap_warnings.append(f'{id_a} overlaps {id_b} (rows [{ra0},{ra1}) x [{rb0},{rb1}), cols [{ca0},{ca1}) x [{cb0},{cb1}))')
 
     if overlap_warnings:

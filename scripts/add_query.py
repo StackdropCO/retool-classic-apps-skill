@@ -152,7 +152,8 @@ def build_sql_query(args):
             attrs.append(('query', query_attr))
         else:
             attrs.append(('query', f'"{query_attr}"'))
-        attrs.append(('resourceName', f'"{args.resource_name}"' if getattr(args, 'resource_name', None) else '"REPLACE_WITH_RESOURCE_UUID"'))
+        attrs.append(('resourceDisplayName', f'"{args.resource_name}"'))
+        attrs.append(('resourceName', '"REPLACE_WITH_RESOURCE_UUID"'))
         attrs.append(('resourceTypeOverride', '""'))
         attrs.append(('warningCodes', '{[]}'))
     else:
@@ -163,7 +164,8 @@ def build_sql_query(args):
         if action_type in ("DELETE_BY",) and args.confirm:
             attrs.append(('requireConfirmation', '{true}'))
 
-        attrs.append(('resourceName', f'"{args.resource_name}"' if getattr(args, 'resource_name', None) else '"REPLACE_WITH_RESOURCE_UUID"'))
+        attrs.append(('resourceDisplayName', f'"{args.resource_name}"'))
+        attrs.append(('resourceName', '"REPLACE_WITH_RESOURCE_UUID"'))
         attrs.append(('resourceTypeOverride', '""'))
         attrs.append(('runWhenModelUpdates', '{false}'))
         if args.table:
