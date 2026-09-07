@@ -475,7 +475,7 @@ App-level sidebar navigation panel (child of `<App>`, via `<Include>`).
 
 **Usage pattern:**
 ```jsx
-<!-- sidebar.rsx -->
+// sidebar.rsx
 <SidebarFrame id="sidebarFrame1" width="240px" padding="8px 12px" isHiddenOnMobile={true} showFooter={true}>
   <Body>
     <Navigation id="sideNav" itemMode="static" orientation="vertical">
@@ -2489,7 +2489,7 @@ Use `<State>` to hold UI mode flags, collected data for modals, static option li
 ```jsx
 <State id="isBulkUpdate" value="{{ false }}" />
 
-<!-- Button toggles it on -->
+// Button toggles it on
 <Button id="bulkUpdateBtn" text="Bulk Update">
   <Event id="ab12cd34" event="click" method="setValue"
     params={{ ordered: [["value", true]] }}
@@ -2668,9 +2668,8 @@ Complete, importable example apps are provided in the `examples/` directory. Eac
   → <SplitPaneFrame position="right" width="{{ dynamic per tab }}">
       → <Container>
           → <Header> → <Text> + <Tabs> + <Button close>
-          → <Body>
-              → <View "details"> → <Form> (detail editor)
-              → <View "activity"> → <Text> (activity placeholder)
+          → <View "details"> → <Form> (detail editor)
+          → <View "activity"> → <Text> (activity placeholder)
   → <GlobalFunctions>
       → State detailTab (tracks active tab)
 ```
@@ -2820,10 +2819,10 @@ Complete, importable example apps are provided in the `examples/` directory. Eac
 
 **Key wiring:**
 ```jsx
-<!-- Table selectRow event → show drawer -->
+// Table selectRow event → show drawer
 <Event id="hex8" event="selectRow" method="show" pluginId="drawerFrame1" type="widget" waitMs="0" waitType="debounce" />
 
-<!-- Drawer close button → hide via setHidden -->
+// Drawer close button → hide via setHidden
 <Event id="hex8" event="click" method="setHidden" params={{ ordered: [{ hidden: true }] }}
   pluginId="drawerFrame1" type="widget" waitMs="0" waitType="debounce" />
 ```
