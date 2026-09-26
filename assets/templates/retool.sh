@@ -19,7 +19,11 @@ VALIDATE="$HOME/.claude/skills/retool-classic-apps-skill/scripts/validate_app.py
 case "${1:-}" in
 pack)
   [ -f app/main.rsx ] || { echo "app/main.rsx missing — nothing to pack"; exit 1; }
-  if [ -f "$VALIDATE" ]; then python3 "$VALIDATE" app; fi
+  if [ -f "$VALIDATE" ]; then
+    python3 "$VALIDATE" app
+  else
+    echo "validator not found ($VALIDATE): refusing to pack UNVALIDATED (the two known silent import killers are exactly what it catches)"; exit 1
+  fi
 
   # FLAT zip: main.rsx / metadata.json at the ARCHIVE ROOT, no wrapper folder.
   # Retool's own "Export to ZIP" produces exactly that layout, and a wrapped

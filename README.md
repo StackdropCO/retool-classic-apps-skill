@@ -100,6 +100,12 @@ All scripts use Python stdlib only. No pip installs required.
 
 ## Eval results
 
+> **Note (2026-09-01, Forge vendoring audit):** the numbers below come from the authors'
+> pre-publication eval lab. The `evals/evals.json` shipped in this repo is a smaller,
+> different set (4 scenarios, prose assertions, no runner), so the table is not currently
+> reproducible from the repo alone. Treat it as the authors' measurement until the full
+> eval set and runner land here.
+
 Tested against 8 eval scenarios (simple → very hard) — each run with the skill vs a baseline without it. All runs used Claude Opus 4.6 with identical prompts. Grading is **strict**: assertions check Retool import correctness (correct element types, ID formats, file structure) and every run is validated with `validate_app.py`.
 
 ### Summary
