@@ -747,6 +747,51 @@ const diff = _.isEqual(a, b);                              // bare
 
 ---
 
+## 11b. `retoolContext` & Release Versions (web apps)
+
+**Documented properties** ([docs](https://docs.retool.com/apps/reference/objects/retoolcontext)):
+`appName`, `appUuid`, `currentPage`, `environment`, `inEditorMode`,
+`pages[]` (`id`, `title`, `url`, `isCurrentPage`), `pageTag`,
+`runningQueries`, `translations`, plus `retoolContext.configVars.X`. There is
+**no** `appVersion` / `releaseVersion` / `releaseTag`.
+
+**`pageTag`** is the release this tab loaded (`"1.4.0"`). It reads `"latest"`
+in the editor, when the app has no release, and under `?_releaseVersion=latest`.
+An open tab keeps the value it loaded with. Version label:
+```jsx
+<Text id="appVersionText" value="Version {{ retoolContext.pageTag }}" />
+```
+
+**`_releaseVersion` URL param:** omitted (or empty or invalid) → the **Live**
+release. `=1.2.0` → that release. `=latest` → the **unpublished working
+copy**, not the newest release (Retool staff, community thread 26426). Never
+put `latest` in a "go to latest" link.
+
+**No built-in "new release available" signal for web apps.** Staff say forcing a
+refresh is not planned, because it could lose unsaved work. Detecting a stale
+tab needs a server-side source of truth, polled from the tab:
+- **Retool API:** `GET /api/v2/apps/{appUuid}` → `data.release_version` (the
+  Live release; `"latest"` if there are no releases). Enterprise, `apps:read`
+  token, called through a REST resource. Costs 2 of the org's 300 points per
+  60 s.
+- **Self-registering table:** each load inserts its `pageTag`
+  (`ON CONFLICT DO NOTHING`); the newest row counts as latest. Stale until
+  someone opens the new release. A revert breaks it.
+- **Tab-age heuristic:** flag after N hours. Needs no infrastructure, but can't
+  tell whether anything is actually new.
+- **A config var does NOT work.** A tab reads it once, at load.
+
+Compare with `!==`, not `>`: a revert can make an older release Live. Skip the
+check when `inEditorMode` is true or `pageTag === 'latest'`.
+
+**Reloading from JS:** `utils.openUrl(url, { newTab: false, forceReload: true })`.
+Without `forceReload`, a same-app URL routes client-side and doesn't reload.
+`window.location.reload()` does nothing, because JS queries run in a sandboxed
+cross-origin iframe. `utils.openApp` also routes client-side. Build the URL
+without `_releaseVersion` to land on the Live release.
+
+---
+
 ## 12. Spec Section Index
 
 | Section | Line | Topic |

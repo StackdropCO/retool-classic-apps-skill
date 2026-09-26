@@ -110,7 +110,7 @@ text="{{ self.value ? 'On' : 'Off' }}"                   // Self-reference
 | `item` | Column/Select/ListViewBeta | Current cell value or iterator item |
 | `i` | ListViewBeta/Action | Current iteration index |
 | `ri` | Nested ListViewBeta | Row index array (`ri[0]` = parent list index) |
-| `retoolContext` | Global | Environment, pages, currentPage |
+| `retoolContext` | Global | `environment`, `pages`, `currentPage`, `appUuid`, `inEditorMode`, `pageTag` (the loaded release, or `"latest"`). See cheatsheet §11b for release versions |
 | `current_user` | Global | email, fullName, profilePhotoUrl |
 | `localStorage` | Global | Persisted local storage values |
 
