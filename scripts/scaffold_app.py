@@ -5,8 +5,13 @@ scaffold_app.py - Create a new Retool app directory from a template.
 Usage:
     python scaffold_app.py "Expense Manager" --template crud --output-dir /tmp/test-apps
     python scaffold_app.py "Team Dashboard" --template advanced-crud --output-dir /tmp/test-apps
+    python scaffold_app.py "Old Style" --template minimal --single-page
 
 Templates: minimal, crud, master-detail, search-filter, chat, advanced-crud
+
+Output is a multi-page app by default (main.rsx -> src/page1.rsx <Screen>,
+.positions/.page1.positions.json, appTemplate.rootScreen). --single-page keeps the
+legacy layout (functions.rsx + .positions.json).
 """
 
 import os
@@ -20,6 +25,9 @@ import re
 import glob
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+import add_page  # noqa: E402
+import validate_app  # noqa: E402
 ASSETS_DIR = os.path.join(SCRIPT_DIR, '..', 'assets', 'examples')
 
 TEMPLATE_MAP = {
@@ -260,8 +268,60 @@ def update_metadata(app_dir):
     return old_uuid, new_uuid
 
 
-def scaffold_app(app_name, template, output_dir):
-    """Main scaffolding function."""
+def to_multipage(app_dir, title, page='page1'):
+    """Convert the copied single-page template into Retool's multi-page layout.
+
+    The <App> body becomes one <Screen> in src/<page>.rsx, with the GlobalFunctions
+    content (queries, State) inlined where functions.rsx was included: in a multi-page
+    app queries are page-scoped and live in their Screen. main.rsx just includes the
+    page, .positions.json becomes .positions/.<page>.positions.json, and metadata gains
+    appTemplate.rootScreen. The Screen attributes copy a real export of a new app.
+    """
+    src_dir = os.path.join(app_dir, 'src')
+    main_path = os.path.join(app_dir, 'main.rsx')
+    functions_path = os.path.join(app_dir, 'functions.rsx')
+    with open(main_path, encoding='utf-8') as f:
+        main = f.read()
+    body = main[main.index('<App>') + len('<App>'):main.rindex('</App>')].strip('\n')
+
+    if os.path.isfile(functions_path):
+        with open(functions_path, encoding='utf-8') as f:
+            funcs = f.read()
+        inner = funcs[funcs.index('<GlobalFunctions>') + len('<GlobalFunctions>'):
+                      funcs.rindex('</GlobalFunctions>')].strip('\n')
+        body = re.sub(r'^[ \t]*<Include src="\./functions\.rsx" />[ \t]*\n?',
+                      lambda m: inner + '\n' if inner else '', body, flags=re.M)
+        os.remove(functions_path)
+
+    # Relative paths were written from the app root; the Screen file lives in src/.
+    def rebase(m):
+        rel = os.path.relpath(os.path.join(app_dir, m.group(2)), src_dir)
+        return m.group(1) + (rel if rel.startswith('..') else './' + rel) + m.group(3)
+    body = re.sub(r'(include\("|<Include\s+src=")(\.\.?/[^"]+)(")', rebase, body)
+
+    os.makedirs(src_dir, exist_ok=True)
+    with open(os.path.join(src_dir, f'{page}.rsx'), 'w', encoding='utf-8') as f:
+        f.write(add_page.screen_xml(page, title, 0, '', body))
+    with open(main_path, 'w', encoding='utf-8') as f:
+        f.write(f'<App>\n  <Include src="./src/{page}.rsx" />\n</App>\n')
+
+    positions_path = os.path.join(app_dir, '.positions.json')
+    if os.path.isfile(positions_path):
+        page_positions = validate_app.page_positions_path(app_dir, page)
+        os.makedirs(os.path.dirname(page_positions), exist_ok=True)
+        os.replace(positions_path, page_positions)
+
+    metadata_path = os.path.join(app_dir, 'metadata.json')
+    with open(metadata_path, encoding='utf-8') as f:
+        metadata = json.load(f)
+    metadata.setdefault('appTemplate', {})['rootScreen'] = page
+    with open(metadata_path, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, indent=2)
+        f.write('\n')
+
+
+def scaffold_app(app_name, template, output_dir, single_page=False):
+    """Main scaffolding function. Multi-page layout unless single_page."""
     # Resolve template directory
     if template not in TEMPLATE_MAP:
         print(f"Error: Unknown template '{template}'.")
@@ -338,6 +398,11 @@ def scaffold_app(app_name, template, output_dir):
     else:
         print("Warning: Could not find pageTitle component to update.")
 
+    # Step 5: Multi-page layout (the default; templates are stored single-page)
+    if not single_page:
+        to_multipage(app_dir, app_name)
+        print("Converted to the multi-page layout: one <Screen> page1 in src/page1.rsx")
+
     # Summary
     all_files = []
     for root, dirs, files in os.walk(app_dir):
@@ -370,9 +435,15 @@ def main():
         default='.',
         help='Output directory (default: current directory)'
     )
+    parser.add_argument(
+        '--single-page',
+        action='store_true',
+        help='Legacy single-page layout (functions.rsx + .positions.json) instead of '
+             'the default multi-page layout'
+    )
 
     args = parser.parse_args()
-    scaffold_app(args.app_name, args.template, args.output_dir)
+    scaffold_app(args.app_name, args.template, args.output_dir, args.single_page)
 
 
 if __name__ == '__main__':

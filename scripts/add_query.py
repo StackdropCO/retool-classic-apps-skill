@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Add a query definition to a Retool ToolScript app's functions.rsx.
+"""Add a query definition to a Retool ToolScript app.
+
+Single-page apps: appended to functions.rsx (<GlobalFunctions>).
+Multi-page apps: appended inside the page's <Screen> (queries are page-scoped), the
+page being --screen or the app's only Screen.
 
 Supports SELECT, INSERT, UPDATE_BY, DELETE_BY, BULK_UPDATE_BY_KEY,
 BULK_UPSERT_BY_KEY, javascript, and sql-transform query types.
@@ -12,6 +16,14 @@ import os
 import re
 import secrets
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import validate_app  # noqa: E402
+
+
+def lib_prefix(args):
+    """Path from the file the query goes in to lib/ (functions.rsx sits at the app root)."""
+    return getattr(args, "lib_prefix", "./lib/")
 
 
 def gen_event_id():
@@ -103,7 +115,7 @@ def build_sql_query(args):
 
     # Determine query attribute
     if args.sql_file:
-        query_attr = '{include("./lib/' + args.id + '.sql", "string")}'
+        query_attr = '{include("' + lib_prefix(args) + args.id + '.sql", "string")}'
     elif args.sql:
         query_attr = args.sql
     else:
@@ -202,7 +214,7 @@ def build_js_query(args):
     indent = "  "
 
     if args.js_file:
-        query_attr = '{include("./lib/' + args.id + '.js", "string")}'
+        query_attr = '{include("' + lib_prefix(args) + args.id + '.js", "string")}'
     elif args.js_body:
         query_attr = f'"{args.js_body}"'
     else:
@@ -239,7 +251,7 @@ def build_sql_transform_query(args):
     indent = "  "
 
     if args.sql_file:
-        query_attr = '{include("./lib/' + args.id + '.sql", "string")}'
+        query_attr = '{include("' + lib_prefix(args) + args.id + '.sql", "string")}'
     elif args.sql:
         query_attr = f'"{args.sql}"'
     else:
@@ -312,11 +324,38 @@ def main():
     parser.add_argument(
         "--records-ref", help="Expression for bulk records"
     )
+    parser.add_argument(
+        "--screen",
+        help="Multi-page apps: the page (Screen id) the query belongs to. "
+        "Default: the only Screen",
+    )
 
     args = parser.parse_args()
 
     app_dir = os.path.abspath(args.app_dir)
-    functions_path = os.path.join(app_dir, "functions.rsx")
+    screen = None
+    if validate_app.is_multipage(app_dir):
+        screens = [r for r in validate_app.walk_app(app_dir) if r["tag"] == "Screen"]
+        if args.screen:
+            screen = next((s for s in screens if s["id"] == args.screen), None)
+        elif len(screens) == 1:
+            screen = screens[0]
+        if screen is None:
+            names = ", ".join(s["id"] for s in screens) or "none"
+            print(
+                f"Error: pick the page with --screen (pages: {names}). Queries are "
+                "page-scoped in a multi-page app.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        functions_path = screen["file"]
+        rel = os.path.relpath(os.path.join(app_dir, "lib"), os.path.dirname(functions_path))
+        args.lib_prefix = (rel if rel.startswith("..") else "./" + rel) + "/"
+    elif args.screen:
+        print("Error: --screen needs a multi-page app (this one is single-page)", file=sys.stderr)
+        sys.exit(1)
+    else:
+        functions_path = os.path.join(app_dir, "functions.rsx")
     if not os.path.isfile(functions_path):
         print(
             f"Error: functions.rsx not found: {functions_path}",
@@ -362,23 +401,34 @@ def main():
                 f.write("\n")
         print(f"Created {js_path}")
 
-    # Insert before </GlobalFunctions>
-    close_tag = "</GlobalFunctions>"
-    insert_pos = content.rfind(close_tag)
-    if insert_pos < 0:
-        print(
-            "Error: </GlobalFunctions> not found in functions.rsx",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    # Add blank line before new query if there's content before it
-    prefix = content[:insert_pos].rstrip()
-    if prefix.endswith("<GlobalFunctions>"):
-        # Empty GlobalFunctions - just add newline
-        new_content = prefix + "\n" + query_xml + "\n" + close_tag + "\n"
+    if screen is not None:
+        # Insert before this Screen's </Screen> (Screens never nest)
+        opening = re.search(r'<Screen\b[^>]*?\bid="' + re.escape(screen["id"]) + '"', content)
+        insert_pos = content.find("</Screen>", opening.end()) if opening else -1
+        if insert_pos < 0:
+            print(f"Error: </Screen> for '{screen['id']}' not found in {functions_path}",
+                  file=sys.stderr)
+            sys.exit(1)
+        new_content = (content[:insert_pos].rstrip() + "\n" + query_xml + "\n"
+                       + content[insert_pos:])
     else:
-        new_content = prefix + "\n\n" + query_xml + "\n" + close_tag + "\n"
+        # Insert before </GlobalFunctions>
+        close_tag = "</GlobalFunctions>"
+        insert_pos = content.rfind(close_tag)
+        if insert_pos < 0:
+            print(
+                "Error: </GlobalFunctions> not found in functions.rsx",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        # Add blank line before new query if there's content before it
+        prefix = content[:insert_pos].rstrip()
+        if prefix.endswith("<GlobalFunctions>"):
+            # Empty GlobalFunctions - just add newline
+            new_content = prefix + "\n" + query_xml + "\n" + close_tag + "\n"
+        else:
+            new_content = prefix + "\n\n" + query_xml + "\n" + close_tag + "\n"
 
     # Write atomically
     tmp_path = functions_path + ".tmp"

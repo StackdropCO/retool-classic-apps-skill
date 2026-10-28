@@ -8,13 +8,17 @@ This skill enables your coding agent to generate complete, importable Retool app
 
 ### Three modes
 
-- **NEW** — "Build me a Retool app for managing expenses" → scaffolds from template, customizes, validates, zips
+- **NEW** — "Build me a Retool app for managing expenses" → scaffolds from template (multi-page layout by default), customizes, validates, zips
 - **EDIT** — "Add a search bar and status filter to my app" → understands existing structure, adds components, fixes positions
 - **IMPROVE** — "Make this app production-ready" → audits against best practices, adds loading states, confirmation dialogs, event chains
 
 ### Works without a database
 
 All 8 example apps include a **Setup Guide modal** with app-specific wiring instructions. Scaffolded apps (crud, master-detail, search-filter, advanced-crud) also include **inline mock data**. Tables and forms are fully populated with sample data on import — no database connection required to explore the app. When you're ready to connect your real database, the Setup Guide walks you through the steps, and removing the mock data is a one-line edit per component (`{{ Array.isArray(q.data) ? q.data : [...] }}` → `{{ q.data }}`).
+
+### Multi-page by default
+
+Apps are built in Retool's multi-page layout, taken from real exports: `main.rsx` includes one `src/<page>.rsx` `<Screen>` per page (each page holds its own queries and frames), layout lives in `.positions/.<page>.positions.json`, and `metadata.json` names the first page in `appTemplate.rootScreen`. Existing single-page apps (`functions.rsx` + `.positions.json`) keep working with every script; `scaffold_app.py --single-page` still creates one.
 
 ## Installation
 
@@ -59,7 +63,8 @@ git -C ~/.claude/skills/retool-classic-apps-skill pull
 │   └── TOOLSCRIPT-SPEC.md        # Full ToolScript spec (~2900 lines)
 ├── scripts/
 │   ├── validate_app.py          # Validate app against all import rules
-│   ├── scaffold_app.py          # Create app from 6 templates
+│   ├── scaffold_app.py          # Create app from 6 templates (multi-page by default)
+│   ├── add_page.py              # Add a page (<Screen>) to a multi-page app
 │   ├── list_components.py       # Parse app → structured component tree
 │   ├── add_component.py         # Add component + update positions atomically
 │   ├── add_query.py             # Add query with event chains
@@ -88,12 +93,13 @@ All scripts use Python stdlib only. No pip installs required.
 | Script | Purpose |
 |--------|---------|
 | `validate_app.py <dir>` | 18 checks against Retool import rules. Run before every zip. |
-| `scaffold_app.py "Name" --template <type>` | Create from template: `minimal`, `crud`, `master-detail`, `search-filter`, `chat`, `advanced-crud` |
+| `scaffold_app.py "Name" --template <type> [--single-page]` | Create from template: `minimal`, `crud`, `master-detail`, `search-filter`, `chat`, `advanced-crud`. Multi-page layout unless `--single-page` |
+| `add_page.py <dir> --id P` | Add a page: `src/P.rsx` `<Screen>`, its positions file, the `main.rsx` Include |
 | `list_components.py <dir>` | Component tree view — understand an app without reading RSX |
-| `add_component.py <dir> --type T --id I ...` | Add component with correct position entry |
-| `add_query.py <dir> --type T --id I ...` | Add query with event chains and lib/ files |
+| `add_component.py <dir> --type T --id I ...` | Add component with correct position entry (in the right page's positions file) |
+| `add_query.py <dir> --type T --id I ...` | Add query with event chains and lib/ files (inside the page's `<Screen>`) |
 | `extract_component.py <dir> --component ID` | Move subtree to `src/` file |
-| `fix_positions.py <dir>` | Recalculate vertical layout after changes |
+| `fix_positions.py <dir>` | Recalculate vertical layout after changes (each page file on its own) |
 | `zip_app.sh <dir>` | Validate + zip for Retool import |
 | `bundle-apps.sh <dir> [output]` | Bundle app files into single `.toolscript-bundle` for LLM context. `--all` for batch. |
 | `compact_bundles.py` | Strip positions/metadata and truncate large inline data from bundles for bulk analysis. |
@@ -137,7 +143,7 @@ Without the skill, Claude produces RSX that *looks* correct but uses wrong eleme
 | `<BarChart>` | `<PlotlyChart>` |
 | `<Functions>` | `<GlobalFunctions>` |
 | Column IDs like `col_status` | 5-char hex like `a1b2c` |
-| `.positions/` directory | `.positions.json` file |
+| `.positions/` files with no `<Screen>` pages | `.positions/.<page>.positions.json` per `<Screen>` + `rootScreen` (or a single-page `.positions.json`) |
 | Descriptive event IDs | 8-char hex IDs |
 
 These are silent import failures — the files look reasonable but Retool's importer rejects them.

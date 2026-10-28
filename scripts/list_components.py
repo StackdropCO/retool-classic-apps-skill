@@ -13,6 +13,9 @@ import os
 import sys
 import argparse
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import validate_app  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # RSX tokenizer (NOT XML — RSX has {true}, {{ expr }}, events={[{...}]}, etc.)
 #
@@ -252,8 +255,12 @@ CONTAINER_TAGS = {'App', 'GlobalFunctions'}
 # Parse RSX text into a tree of Nodes
 # ---------------------------------------------------------------------------
 
-def parse_rsx(text, app_dir, src_annotation=None):
-    """Parse RSX text and return a list of top-level Nodes."""
+def parse_rsx(text, app_dir, src_annotation=None, base_dir=None):
+    """Parse RSX text and return a list of top-level Nodes.
+
+    `base_dir` is the directory of the file being parsed: <Include src> is relative
+    to it (src/page1.rsx includes ./UserDrawer.rsx), not to the app root.
+    """
     nodes = []
     stack = []          # list of (Node | section_marker)
     section_stack = []  # tracks current Header/Body/Footer context
@@ -262,12 +269,13 @@ def parse_rsx(text, app_dir, src_annotation=None):
         if tag == 'Include' and not is_close:
             src = extract_attr(attrs_str, 'src')
             if src and isinstance(src, str):
-                inc_path = os.path.normpath(os.path.join(app_dir, src))
+                inc_path = os.path.normpath(os.path.join(base_dir or app_dir, src))
                 if os.path.isfile(inc_path):
                     # Determine annotation (relative to app dir)
                     rel = os.path.relpath(inc_path, app_dir)
                     inc_text = _read_file(inc_path)
-                    inc_nodes = parse_rsx(inc_text, app_dir, src_annotation=rel)
+                    inc_nodes = parse_rsx(inc_text, app_dir, src_annotation=rel,
+                                          base_dir=os.path.dirname(inc_path))
                     parent = stack[-1] if stack else None
                     for n in inc_nodes:
                         if src_annotation is None and rel != 'functions.rsx':
@@ -417,12 +425,8 @@ def build_app_tree(app_dir):
     # Also read raw text for option counting
     all_rsx_text = _gather_all_rsx(app_dir)
 
-    # Load positions
-    positions = {}
-    pos_path = os.path.join(app_dir, '.positions.json')
-    if os.path.isfile(pos_path):
-        with open(pos_path, 'r', encoding='utf-8') as f:
-            positions = json.load(f)
+    # Load positions (.positions.json, or every .positions/ page file merged)
+    positions = validate_app.load_positions(app_dir)[0]
 
     # Build a single root
     root = Node('App', '', {})
@@ -633,6 +637,13 @@ def _format_node(node, all_rsx_text, positions):
 
     elif tag == 'GlobalFunctions':
         pass  # Just the tag name
+
+    elif tag == 'Screen':
+        # A page of a multi-page app: its title and URL slug
+        title = node.attrs.get('title', '')
+        if title:
+            parts.append(f'"{title}"')
+        parts.append(f"/{node.attrs.get('urlSlug', '')}")
 
     if src_note:
         parts.append(src_note)

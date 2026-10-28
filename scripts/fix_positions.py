@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-fix_positions.py — Recalculate vertical layout positions in .positions.json.
+fix_positions.py — Recalculate vertical layout positions in .positions.json
+or, for a multi-page app, in each .positions/.<page>.positions.json.
 
 Safe-by-default: dry-run unless --apply is passed. Scopes that are already valid
 (no overlaps, no zero-height entries) are left untouched so intentional authored
@@ -22,6 +23,10 @@ Modes
     python fix_positions.py <app-dir> --scope EditInteractionForm \\
         --shift-from 10.2 --by 3.2 --apply
 
+    # Multi-page app: every .positions/ page file is fixed on its own (pages never
+    # share rows); --screen limits the run to one page ('global' for the global file).
+    python fix_positions.py <app-dir> --screen settings --apply
+
 Notes
 -----
 - `--container` is accepted as an alias for `--scope` with a deprecation warning
@@ -36,6 +41,9 @@ import json
 import os
 import sys
 from collections import defaultdict
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import validate_app  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +310,7 @@ def collapse_gaps(positions, target_scope=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Recalculate vertical layout positions in .positions.json (dry-run by default)"
+        description="Recalculate vertical layout positions in .positions.json or each .positions/ page file (dry-run by default)"
     )
     parser.add_argument("app_dir", help="Path to the Retool app directory")
     parser.add_argument(
@@ -335,6 +343,12 @@ def main(argv=None):
         default=None,
         help="Row delta. Required when --shift-from is set.",
     )
+    parser.add_argument(
+        "--screen",
+        default=None,
+        help="Multi-page apps: only this page's positions file ('global' for "
+        ".global_positions.json). Default: every page file, each on its own.",
+    )
     args = parser.parse_args(argv)
 
     if not os.path.isdir(args.app_dir):
@@ -355,8 +369,29 @@ def main(argv=None):
         if args.by is None or args.scope is None:
             parser.error("--shift-from requires --by and --scope")
 
-    pos_file, positions = load_positions(args.app_dir)
+    app_dir = os.path.abspath(args.app_dir)
+    if not validate_app.is_multipage(app_dir):
+        if args.screen:
+            parser.error("--screen needs a multi-page app (this one is single-page)")
+        _fix_file(*load_positions(app_dir), args)
+        return
 
+    # Multi-page: each page file is its own layout plane, fixed on its own.
+    files = validate_app.positions_files(app_dir)
+    if args.screen:
+        wanted = validate_app.page_positions_path(
+            app_dir, None if args.screen == "global" else args.screen)
+        files = [f for f in files if f == wanted]
+        if not files:
+            parser.error(f"no positions file for --screen {args.screen} ({wanted})")
+    for pos_file in files:
+        print(f"== {os.path.relpath(pos_file, app_dir)}")
+        with open(pos_file, "r", encoding="utf-8") as f:
+            _fix_file(pos_file, json.load(f), args)
+        print()
+
+
+def _fix_file(pos_file, positions, args):
     if args.shift_from is not None:
         changes = shift_scope(positions, args.scope, args.shift_from, args.by)
     else:

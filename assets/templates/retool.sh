@@ -28,7 +28,9 @@ pack)
   # FLAT zip: main.rsx / metadata.json at the ARCHIVE ROOT, no wrapper folder.
   # Retool's own "Export to ZIP" produces exactly that layout, and a wrapped
   # zip can import as NOTHING, silently. The app's display name comes from the
-  # import dialog, not from the archive.
+  # import dialog, not from the archive. `zip -r .` includes dot-directories, so a
+  # multi-page app's .positions/ page files go in (unzip and `cp -Rp src/.` below
+  # bring them back on unpack).
   mkdir -p build
   rm -f "build/$NAME.zip"
   (cd app && zip -qr "../build/$NAME.zip" . -x '*.DS_Store' -x '.DS_Store')

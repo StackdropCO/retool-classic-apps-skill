@@ -11,7 +11,7 @@
       "files": [],
       "expectations": [
         "A main.rsx file exists in the app directory",
-        "A functions.rsx file exists with SQL queries",
+        "SQL queries exist: inside the page's <Screen> (src/<page>.rsx, the default multi-page layout) or in functions.rsx for a single-page app",
         "A Table component exists with columns for employee_name, amount, category, status, and date",
         "A ModalFrame with Form for creating expenses exists",
         "A SplitPaneFrame detail pane for editing exists",

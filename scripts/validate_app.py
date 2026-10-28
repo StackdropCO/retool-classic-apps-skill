@@ -62,7 +62,13 @@ def _parse_tags(content):
     # Find all potential tag starts: < followed by optional / and a tag name
     tag_start_re = re.compile(r'<(/?)([A-Z][A-Za-z0-9_-]*|[a-z][A-Za-z0-9_]*)')
 
+    # A match inside the attributes of the tag just scanned is text, not a tag:
+    # value="<h4> Title" or a _comment naming a <Screen> (both real, both once
+    # broke the tag balance check).
+    resume = 0
     for m in tag_start_re.finditer(content):
+        if m.start() < resume:
+            continue
         is_close = m.group(1) == '/'
         tag = m.group(2)
         after_name = m.end()
@@ -91,10 +97,12 @@ def _parse_tags(content):
             # Check for end of tag
             if content[i] == '>':
                 attrs_str = content[attrs_start:i]
+                resume = i + 1
                 yield (False, tag, attrs_str, False, m.start())
                 break
             if content[i] == '/' and i + 1 < n and content[i + 1] == '>':
                 attrs_str = content[attrs_start:i]
+                resume = i + 2
                 yield (False, tag, attrs_str, True, m.start())
                 break
 
@@ -254,6 +262,7 @@ def has_attr(attrs_str, attr_name):
 
 STRUCTURAL_TAGS = {
     'App', 'Include', 'GlobalFunctions', 'Folder',
+    'Screen',  # a page of a multi-page app; positioned by nothing
     'Event', 'Column', 'Option', 'Property', 'Action', 'ToolbarButton',
     'Header', 'Body', 'Footer', 'View',
     'Frame',  # Frames with $ prefix
@@ -270,6 +279,104 @@ STRUCTURAL_TAGS = {
     # internal flex layout, not the app-grid .positions.json.
     'ButtonGroup2-Button',
 }
+
+# ---------------------------------------------------------------------------
+# App layout: single-page vs multi-page. Shared by the other scripts
+# (`import validate_app`), so every script reads the layout the same way.
+#
+# Multi-page (Retool's current shape, taken from real exports): main.rsx includes one
+# src/<screenId>.rsx per page, each a <Screen> holding that page's queries, State and
+# frames. Layout lives in .positions/.<screenId>.positions.json, and components outside
+# every Screen (a global $header frame) in .positions/.global_positions.json.
+# Single-page (legacy): functions.rsx holds the queries, .positions.json the layout.
+# ---------------------------------------------------------------------------
+
+def is_multipage(app_dir):
+    """A multi-page app has appTemplate.rootScreen in metadata.json (Retool's own export
+    marker) or a <Screen> tag in any .rsx file."""
+    try:
+        with open(os.path.join(app_dir, 'metadata.json'), encoding='utf-8') as f:
+            if json.load(f).get('appTemplate', {}).get('rootScreen'):
+                return True
+    except Exception:
+        pass
+    for path in glob.glob(os.path.join(app_dir, '**', '*.rsx'), recursive=True):
+        with open(path, encoding='utf-8') as f:
+            if any(t == 'Screen' and not c for c, t, _, _, _ in _parse_tags(f.read())):
+                return True
+    return False
+
+
+def page_positions_path(app_dir, screen):
+    """The positions file a component on `screen` (None = global scope) belongs in."""
+    name = f'.{screen}.positions.json' if screen else '.global_positions.json'
+    return os.path.join(app_dir, '.positions', name)
+
+
+def positions_files(app_dir):
+    """Desktop positions files: .positions.json and/or the .positions/ page files.
+
+    Mobile files (.<page>.mobilePositions.json, .global_mobile_positions.json) are a
+    separate layout of the same components and are left out.
+    """
+    files = [os.path.join(app_dir, '.positions.json')]
+    files += sorted(glob.glob(os.path.join(app_dir, '.positions', '.*.positions.json')))
+    files.append(os.path.join(app_dir, '.positions', '.global_positions.json'))
+    return [f for f in files if os.path.isfile(f)]
+
+
+def load_positions(app_dir):
+    """Return (positions, source, dups) merged over every positions file.
+
+    `source` maps each id to the file it came from, so checks can keep pages apart.
+    `dups` lists ids found in more than one file (the later file would silently win).
+    """
+    positions, source, dups = {}, {}, []
+    for path in positions_files(app_dir):
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        name = os.path.basename(path)
+        for comp_id, pos in data.items():
+            if comp_id in source:
+                dups.append(f'{comp_id} ({source[comp_id]}, {name})')
+            positions[comp_id] = pos
+            source[comp_id] = name
+    return positions, source, dups
+
+
+def walk_app(app_dir):
+    """Every opening tag reachable from main.rsx, following <Include src> (relative to
+    the including file), as dicts {screen, tag, id, attrs, file}. `screen` is the id of
+    the enclosing <Screen>, or None for global scope (outside every page)."""
+    records, seen = [], set()
+
+    def visit(path, screen):
+        if path in seen or not os.path.isfile(path):
+            return
+        seen.add(path)
+        with open(path, encoding='utf-8') as f:
+            content = f.read()
+        stack = []  # (tag, screen in effect inside it)
+        for is_close, tag, attrs, self_close, _ in _parse_tags(content):
+            if is_close:
+                if stack and stack[-1][0] == tag:
+                    stack.pop()
+                continue
+            current = stack[-1][1] if stack else screen
+            comp_id = get_attr_value(attrs, 'id')
+            if tag == 'Include':
+                src = get_attr_value(attrs, 'src')
+                if src:
+                    visit(os.path.normpath(os.path.join(os.path.dirname(path), src)), current)
+                continue
+            records.append({'screen': current, 'tag': tag, 'id': comp_id,
+                            'attrs': attrs, 'file': path})
+            if not self_close:
+                stack.append((tag, comp_id if tag == 'Screen' else current))
+
+    visit(os.path.join(app_dir, 'main.rsx'), None)
+    return records
+
 
 MUTATION_ACTION_TYPES = {
     'INSERT', 'UPDATE_BY', 'DELETE_BY', 'BULK_UPDATE_BY_KEY', 'BULK_UPSERT_BY_KEY',
@@ -308,7 +415,13 @@ def validate_app(app_dir):
     # -----------------------------------------------------------------------
     # 1. Required files exist
     # -----------------------------------------------------------------------
-    required = ['main.rsx', 'functions.rsx', 'metadata.json', '.positions.json']
+    multipage = is_multipage(app_dir)
+    if multipage:
+        # Queries live inside each <Screen>, layout lives in .positions/: neither
+        # functions.rsx nor .positions.json is part of a multi-page export.
+        required = ['main.rsx', 'metadata.json']
+    else:
+        required = ['main.rsx', 'functions.rsx', 'metadata.json', '.positions.json']
     missing = [f for f in required if not os.path.isfile(os.path.join(app_dir, f))]
     if missing:
         vr.add('FAIL', f'Required files missing: {", ".join(missing)}')
@@ -417,11 +530,12 @@ def validate_app(app_dir):
     frame_nesting_errors = []
     for c in all_components:
         if c['tag'] in frame_types:
-            # Valid parents: App (if in main.rsx), or None (root of an included file)
-            if c['parent_tag'] is not None and c['parent_tag'] != 'App':
+            # Valid parents: App (if in main.rsx), Screen (a page of a multi-page
+            # app), or None (root of an included file)
+            if c['parent_tag'] is not None and c['parent_tag'] not in ('App', 'Screen'):
                 frame_nesting_errors.append(
                     f"{c['tag']} id={c['id']} is inside <{c['parent_tag']}> "
-                    f"(expected direct child of <App> or file root) in {os.path.basename(c['file'])}"
+                    f"(expected direct child of <App>/<Screen> or file root) in {os.path.basename(c['file'])}"
                 )
 
     if frame_nesting_errors:
@@ -436,15 +550,17 @@ def validate_app(app_dir):
     # -----------------------------------------------------------------------
     forms = [c for c in all_components if c['tag'] == 'Form']
     form_errors = []
+    form_warnings = []
     for form in forms:
         form_id = form['id']
         children = [c for c in all_components
                      if c['parent_tag'] == 'Form' and c['parent_id'] == form_id]
         child_tags = {c['tag'] for c in children}
 
-        # Body is the only strictly required subtree.
+        # Body: always write one. A WARN, not a FAIL: Retool itself exports a Form
+        # with only a <Header> (expert-directory form1), so it is not an import killer.
         if 'Body' not in child_tags:
-            form_errors.append(f"Form id={form_id} missing <Body>")
+            form_warnings.append(f"Form id={form_id} missing <Body>")
 
         # Header: required if showHeader is explicitly true (respects authored intent).
         show_header = get_attr_value(form['attrs'], 'showHeader')
@@ -452,7 +568,9 @@ def validate_app(app_dir):
             form_errors.append(f"Form id={form_id} has showHeader=true but missing <Header>")
 
     if form_errors:
-        vr.add('FAIL', f'Form structure errors: {"; ".join(form_errors)}')
+        vr.add('FAIL', f'Form structure errors: {"; ".join(form_errors + form_warnings)}')
+    elif form_warnings:
+        vr.add('WARN', f'Form structure (renders an empty form): {"; ".join(form_warnings)}')
     else:
         vr.add('PASS', f'Form structure valid ({len(forms)} form{"s" if len(forms) != 1 else ""})')
 
@@ -504,11 +622,7 @@ def validate_app(app_dir):
     # -----------------------------------------------------------------------
     # 8-12. Positions checks
     # -----------------------------------------------------------------------
-    positions_path = os.path.join(app_dir, '.positions.json')
-    positions = {}
-    if os.path.isfile(positions_path):
-        with open(positions_path) as f:
-            positions = json.load(f)
+    positions, position_source, position_dups = load_positions(app_dir)
 
     # 8. All visible components have positions
     visible_components = []
@@ -645,7 +759,9 @@ def validate_app(app_dir):
     # 15. Event IDs match ^[0-9a-f]{8}$
     # -----------------------------------------------------------------------
     events = [c for c in all_components if c['tag'] == 'Event' and c['id']]
-    event_id_pattern = re.compile(r'^[0-9a-f]{8}$')
+    # mockEventHandlerIdN is Retool's own id for the handler its Navigation template
+    # ships with (seen in a real export); anything else hand-typed still fails.
+    event_id_pattern = re.compile(r'^([0-9a-f]{8}|mockEventHandlerId\d+)$')
     bad_event_ids = [c['id'] for c in events if not event_id_pattern.match(c['id'])]
     if bad_event_ids:
         vr.add('FAIL', f'Invalid Event IDs: {", ".join(bad_event_ids)}')
@@ -672,10 +788,11 @@ def validate_app(app_dir):
     # -----------------------------------------------------------------------
     # 17. Option IDs match ^[0-9a-f]{5}$
     #     In practice, Option IDs use 5-char lowercase alphanumeric (e.g. t1a2b).
-    #     We accept ^[a-z0-9]{5}$ to match actual usage.
+    #     Retool also exports 4-char ones ("0000", "0001" in a real export), so
+    #     we accept ^[a-z0-9]{4,5}$ to match actual usage.
     # -----------------------------------------------------------------------
     options = [c for c in all_components if c['tag'] == 'Option' and c['id']]
-    option_id_pattern = re.compile(r'^[a-z0-9]{5}$')
+    option_id_pattern = re.compile(r'^[a-z0-9]{4,5}$')
     bad_option_ids = [c['id'] for c in options if not option_id_pattern.match(c['id'])]
     if bad_option_ids:
         vr.add('FAIL', f'Invalid Option IDs: {", ".join(bad_option_ids)}')
@@ -766,11 +883,7 @@ def validate_app(app_dir):
     # not being followed. WARN names the pair so a human decides.
     # -----------------------------------------------------------------------
     overlap_warnings = []
-    try:
-        with open(os.path.join(app_dir, '.positions.json'), encoding='utf-8') as f:
-            all_positions = json.load(f)
-    except Exception:
-        all_positions = {}
+    all_positions = positions
     # Overlay frames (ModalFrame/DrawerFrame/SplitPaneFrame/SidebarFrame) carry a position
     # entry in the wild but do not occupy grid space in the plane they sit in, so they are
     # excluded, or every app with a modal would warn.
@@ -784,7 +897,10 @@ def validate_app(app_dir):
     for comp_id, pos in all_positions.items():
         if not isinstance(pos, dict) or comp_id in overlay_ids:
             continue
-        scope = (pos.get('container', ''), pos.get('subcontainer', ''), pos.get('rowGroup', ''))
+        # Each page of a multi-page app is its own plane, so the source file is part of
+        # the scope (it is always the same file for a single-page app).
+        scope = (position_source.get(comp_id, ''), pos.get('container', ''),
+                 pos.get('subcontainer', ''), pos.get('rowGroup', ''))
         scopes.setdefault(scope, []).append((comp_id, pos))
     for scope, entries in scopes.items():
         for i in range(len(entries)):
@@ -804,7 +920,107 @@ def validate_app(app_dir):
     else:
         vr.add('PASS', 'No grid overlaps')
 
+    # Multi-page checks come last so a single-page report is unchanged.
+    if multipage:
+        check_pages(vr, app_dir, position_source, position_dups, PARENT_SCOPED_TAGS)
+
     return app_name, vr
+
+
+def _identifiers(text):
+    """Names an expression reads: quoted strings dropped, `.prop` accesses ignored."""
+    text = re.sub(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"|`(?:\\.|[^`\\])*`", ' ', text)
+    return set(re.findall(r'(?<![\w$.])[A-Za-z_$][\w$]*', text))
+
+
+def check_pages(vr, app_dir, position_source, position_dups, parent_scoped_tags):
+    """Checks that only exist for a multi-page app (structure taken from real exports)."""
+    records = walk_app(app_dir)
+    screens = [r for r in records if r['tag'] == 'Screen']
+    screen_ids = [s['id'] for s in screens]
+
+    # P1. rootScreen names a page. Every real multi-page export carries it.
+    try:
+        with open(os.path.join(app_dir, 'metadata.json'), encoding='utf-8') as f:
+            root = json.load(f).get('appTemplate', {}).get('rootScreen')
+    except Exception:
+        root = None
+    if not root:
+        vr.add('FAIL', 'Multi-page app but metadata.json has no appTemplate.rootScreen')
+    elif root not in screen_ids:
+        vr.add('FAIL', f"rootScreen '{root}' is not a <Screen> reachable from main.rsx "
+                       f"(screens: {', '.join(screen_ids) or 'none'})")
+    else:
+        vr.add('PASS', f"rootScreen '{root}' is a Screen ({len(screens)} page{'s' if len(screens) != 1 else ''})")
+
+    # P2. Screen identity is unique. Screen ids are covered by the duplicate-ID check;
+    # an empty urlSlug is what Retool exports for a new app's first page.
+    screen_dups = []
+    for attr in ('uuid', '_order', 'urlSlug'):
+        by_value = {}
+        for s in screens:
+            value = get_attr_value(s['attrs'], attr)
+            if value is None or (attr == 'urlSlug' and value == ''):
+                continue
+            by_value.setdefault(value, []).append(s['id'])
+        screen_dups += [f'{attr}={v} ({", ".join(ids)})' for v, ids in by_value.items() if len(ids) > 1]
+    if screen_dups:
+        vr.add('FAIL', f'Duplicate Screen attributes: {"; ".join(screen_dups)}')
+    else:
+        vr.add('PASS', 'Screen uuid, _order and urlSlug are unique')
+
+    # P3. One id, one positions file: on a merge the later file would silently win.
+    if position_dups:
+        vr.add('FAIL', f'Ids in more than one positions file: {"; ".join(position_dups)}')
+    else:
+        vr.add('PASS', 'No id in two positions files')
+
+    # P4. Each component is laid out by its own page's file (global scope by
+    # .global_positions.json). An entry in another page's file is never read for it.
+    misplaced = []
+    for r in records:
+        if not r['id'] or r['tag'] in STRUCTURAL_TAGS:
+            continue
+        actual = position_source.get(r['id'])
+        expected = os.path.basename(page_positions_path(app_dir, r['screen']))
+        if actual and actual != expected:
+            misplaced.append(f"{r['id']} is in {actual}, expected {expected}")
+    if misplaced:
+        vr.add('FAIL', f'Position entries in the wrong page file: {"; ".join(misplaced)}')
+    else:
+        vr.add('PASS', 'Position entries are in their page file')
+
+    # P5. Page scope (Retool docs): a page cannot see another page's components or
+    # queries, and global code cannot see any page's. Such a reference is undefined at
+    # runtime, never an import error, hence WARN.
+    owner = {r['id']: r['screen'] for r in records
+             if r['id'] and r['screen'] and r['tag'] not in parent_scoped_tags}
+    used = {}
+    for r in records:
+        names = used.setdefault(r['screen'], set())
+        for expr in re.findall(r'\{\{(.*?)\}\}', r['attrs'], re.S):
+            names |= _identifiers(expr)
+        plugin = get_attr_value(r['attrs'], 'pluginId')
+        if plugin:
+            names.add(plugin)
+        for target in re.findall(r'include\("([^"]+)"', r['attrs']):
+            path = os.path.normpath(os.path.join(os.path.dirname(r['file']), target))
+            if not os.path.isfile(path):
+                continue
+            with open(path, encoding='utf-8') as f:
+                body = f.read()
+            if path.endswith('.js'):
+                names |= _identifiers(body)
+            else:
+                for expr in re.findall(r'\{\{(.*?)\}\}', body, re.S):
+                    names |= _identifiers(expr)
+    cross = [f"{scope or 'global scope'} uses {name} (page {owner[name]})"
+             for scope, names in used.items() for name in sorted(names)
+             if name in owner and owner[name] != scope]
+    if cross:
+        vr.add('WARN', f'Cross-page references (undefined at runtime): {"; ".join(cross[:10])}')
+    else:
+        vr.add('PASS', 'No cross-page references')
 
 
 # ---------------------------------------------------------------------------

@@ -2073,6 +2073,16 @@ Each page is a `<Screen>` in a separate `.rsx` file, included from `main.rsx`.
 </Navigation>
 ```
 
+### Verified against real exports (expert-directory, an empty multi-page export)
+- `main.rsx` holds `<Include>`s of the Screen files plus global content (a `$header` Frame, `DocumentTitle`). No `functions.rsx`, no `.positions.json`.
+- Queries, `Folder`s, `State`, `AppStyles` sit inside the `<Screen>`; so do `ModalFrame`/`SidebarFrame`/`DrawerFrame`, often via `<Include>` relative to the Screen file.
+- Each page's components are laid out in `.positions/.<screenId>.positions.json` and nowhere else; components outside every Screen in `.positions/.global_positions.json` (direct children of `$header` carry `"subcontainer": "header"`). An empty page has no file.
+- Frame ids are unique across the app: `$main`, `$main3`, `$main4`, `$header`.
+- `_order` is unique per Screen; the first page of a new app exports `urlSlug=""`.
+- Retool exports some ids outside the hex rules: `<Event id="mockEventHandlerId1">`, `<Option id="0000">`; and a `<Form>` with only a `<Header>`.
+- Page scope (Retool docs): page objects are invisible to other pages and to global code.
+- Header navigation in the export: `data="{{ retoolContext.pages }}"`, `labels="{{ item.title || item.id }}"`, `highlightByIndex="{{ retoolContext.currentPage === item.id }}"`, and an `openPage` Event with `params={{ map: { pageName: "{{ item.id }}" } }}`.
+
 **Apps:** Iris Atlas v2
 
 ---

@@ -34,10 +34,11 @@ if [ ! -d "$APP_DIR" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Check required files
+# Check required files. Only the two every layout has: a multi-page app has no
+# functions.rsx / .positions.json (validate_app.py checks the layout-specific files).
 # ---------------------------------------------------------------------------
 MISSING=0
-for f in main.rsx functions.rsx metadata.json .positions.json; do
+for f in main.rsx metadata.json; do
     if [ ! -f "$APP_DIR/$f" ]; then
         echo "Error: Missing required file: $f"
         MISSING=1
@@ -91,6 +92,8 @@ echo "=== Creating zip ==="
 # Retool's own "Export to ZIP" is flat, and a wrapped zip can import as
 # NOTHING, silently. The app's name comes from the import dialog, not from a
 # folder inside the archive.
+# `zip -r .` includes dot-files and dot-directories, so a multi-page app's
+# .positions/.<page>.positions.json files are in the archive (checked on a probe zip).
 (
     cd "$APP_DIR"
     zip -r "$OUTPUT" . \

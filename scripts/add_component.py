@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Add a component to an existing Retool ToolScript app.
 
-Updates both the .rsx file and .positions.json atomically.
+Updates both the .rsx file and the positions file atomically: .positions.json for a
+single-page app; for a multi-page app the page's .positions/.<screenId>.positions.json
+(or .global_positions.json outside every page), where the page is the one the
+--after/--before/--parent-frame component lives on, or --screen.
 Uses regex-based parsing (RSX is NOT valid XML).
 """
 
@@ -10,6 +13,14 @@ import json
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import validate_app  # noqa: E402
+
+
+def fail(message):
+    print(f"Error: {message}", file=sys.stderr)
+    sys.exit(1)
 
 # Default heights by component type
 DEFAULT_HEIGHTS = {
@@ -232,7 +243,14 @@ def main():
     parser.add_argument("--type", required=True, help="Component tag name")
     parser.add_argument("--id", required=True, help="Component ID")
     parser.add_argument(
-        "--parent-frame", default="$main", help="Parent frame/container ID"
+        "--parent-frame",
+        default=None,
+        help="Parent frame/container ID (default: $main, or the --screen page's main frame)",
+    )
+    parser.add_argument(
+        "--screen",
+        help="Multi-page apps: the page (Screen id) to add to. Default: the page the "
+        "--after/--before/--parent-frame component lives on",
     )
     parser.add_argument("--after", help="ID of sibling to insert after")
     parser.add_argument("--before", help="ID of sibling to insert before")
@@ -261,36 +279,64 @@ def main():
         help="Row group for form header/footer",
     )
     parser.add_argument(
-        "--file", default="main.rsx", help="Which .rsx file to modify"
+        "--file",
+        default=None,
+        help="Which .rsx file to modify (default: main.rsx; multi-page apps: the file "
+        "the anchor component is in)",
     )
     parser.add_argument("--children", default="", help="Inline RSX children")
 
     args = parser.parse_args()
 
     app_dir = os.path.abspath(args.app_dir)
-    rsx_path = os.path.join(app_dir, args.file)
-    if not os.path.isfile(rsx_path):
-        # Check in src/ subdirectory
-        rsx_path_alt = os.path.join(app_dir, "src", args.file)
-        if os.path.isfile(rsx_path_alt):
-            rsx_path = rsx_path_alt
-        else:
-            print(f"Error: RSX file not found: {rsx_path}", file=sys.stderr)
-            sys.exit(1)
+    multipage = validate_app.is_multipage(app_dir)
+    if args.screen and not multipage:
+        fail("--screen needs a multi-page app (this one is single-page)")
 
-    positions_path = os.path.join(app_dir, ".positions.json")
-    if not os.path.isfile(positions_path):
-        print(
-            f"Error: Positions file not found: {positions_path}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    if multipage:
+        # Layout lives per page: find the page (and file) the anchor sits on.
+        records = validate_app.walk_app(app_dir)
+        if args.parent_frame is None and args.screen:
+            args.parent_frame = next(
+                (r["id"] for r in records
+                 if r["tag"] == "Frame" and r["screen"] == args.screen
+                 and validate_app.get_attr_value(r["attrs"], "type") == "main"),
+                None,
+            )
+            if args.parent_frame is None:
+                fail(f"no page '{args.screen}' with a type=\"main\" Frame")
+        args.parent_frame = args.parent_frame or "$main"
+        anchor = args.after or args.before or args.parent_frame
+        rec = next((r for r in records if r["id"] == anchor), None)
+        if rec is None:
+            fail(f"component '{anchor}' not found in any file reachable from main.rsx")
+        if args.screen and rec["screen"] != args.screen:
+            fail(f"'{anchor}' is on {rec['screen'] or 'the global scope'}, not page '{args.screen}'")
+        rsx_path = rec["file"]
+        positions_path = validate_app.page_positions_path(app_dir, rec["screen"])
+    else:
+        args.parent_frame = args.parent_frame or "$main"
+        positions_path = os.path.join(app_dir, ".positions.json")
+        if not os.path.isfile(positions_path):
+            fail(f"Positions file not found: {positions_path}")
 
-    # Read files
+    if args.file or not multipage:
+        rsx_path = os.path.join(app_dir, args.file or "main.rsx")
+        if not os.path.isfile(rsx_path):
+            # Check in src/ subdirectory
+            rsx_path_alt = os.path.join(app_dir, "src", args.file or "main.rsx")
+            if os.path.isfile(rsx_path_alt):
+                rsx_path = rsx_path_alt
+            else:
+                fail(f"RSX file not found: {rsx_path}")
+
+    # Read files (an empty page has no positions file yet)
     with open(rsx_path, "r") as f:
         rsx_content = f.read()
-    with open(positions_path, "r") as f:
-        positions = json.load(f)
+    positions = {}
+    if os.path.isfile(positions_path):
+        with open(positions_path, "r") as f:
+            positions = json.load(f)
 
     # Determine height
     comp_height = args.height
@@ -350,7 +396,10 @@ def main():
             # Find </Frame> that ends at parent_end
             close_match = rsx_content.rfind(close_tag, 0, parent_end)
             if close_match >= 0:
-                insert_pos = close_match
+                # Start of the </Frame> line, so the closing tag keeps its indent
+                line_start = rsx_content.rfind("\n", 0, close_match) + 1
+                indent_only = not rsx_content[line_start:close_match].strip()
+                insert_pos = line_start if indent_only else close_match
             else:
                 insert_pos = parent_end
         rsx_content = (
@@ -406,6 +455,7 @@ def main():
     os.replace(tmp_rsx, rsx_path)
 
     # Write positions
+    os.makedirs(os.path.dirname(positions_path), exist_ok=True)
     tmp_pos = positions_path + ".tmp"
     with open(tmp_pos, "w") as f:
         json.dump(positions, f, indent=2)

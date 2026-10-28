@@ -32,7 +32,32 @@ This skill creates importable Retool apps. Each app is a directory containing RS
 
 **Scripts** in `scripts/` handle validation, scaffolding, and position math — use them instead of manual RSX editing whenever possible.
 
-**Output contract:** ALWAYS produce a named directory with all required files (`main.rsx`, `functions.rsx`, `metadata.json`, `.positions.json`) AND a **flat** zip via `zip_app.sh` (`main.rsx` at the archive root — a wrapper folder can make the import silently no-op).
+**Output contract:** ALWAYS produce a named directory in the **multi-page layout** (the default, see A1) — `main.rsx`, one `src/<page>.rsx` `<Screen>` per page, `metadata.json` with `appTemplate.rootScreen`, and `.positions/.<page>.positions.json` — AND a **flat** zip via `zip_app.sh` (`main.rsx` at the archive root — a wrapper folder can make the import silently no-op). Keep an existing single-page app single-page (`functions.rsx` + `.positions.json`) unless the user asks to convert it.
+
+## A1. App Layout: Multi-Page (default) vs Single-Page (legacy)
+
+Retool's current app shape, taken from real exports:
+
+```
+app-name/
+├── main.rsx                         # <App> + one <Include> per page (+ global frames)
+├── metadata.json                    # appTemplate.rootScreen = the page that opens first
+├── src/
+│   ├── page1.rsx                    # <Screen id="page1"> — that page's queries, State,
+│   │                                #   its $main Frame, its ModalFrame/DrawerFrame
+│   └── editModal.rsx                # included from page1.rsx: <Include src="./editModal.rsx" />
+├── lib/                             # SQL/JS, included from src/ as ../lib/x.sql
+└── .positions/
+    ├── .page1.positions.json        # layout of page1's components only
+    └── .global_positions.json       # components outside every Screen (a $header frame)
+```
+
+- **Page scope.** A page's components and queries are invisible to other pages, and global code (outside every `<Screen>`) cannot read page objects. Share through a global State, URL params, or the global `$header`/sidebar frame. `validate_app.py` WARNs on cross-page references.
+- **One positions file per page.** A component's entry goes in its own page's file; an entry in another page's file is never read (validator FAILs). An empty page has no file.
+- **Frame ids are app-unique:** `$main` on the first page, `$main2`, `$main3`... on later ones.
+- **Frames** (`ModalFrame`, `DrawerFrame`, `SplitPaneFrame`, `SidebarFrame`) are direct children of their page's `<Screen>`.
+- **Add a page** with `add_page.py <dir> --id settings --title "Settings"` (unique `_order`, `uuid`, `urlSlug`, frame id). Navigation between pages: a `Navigation` in a global `$header` frame (Quick Templates, I).
+- **Single-page (legacy):** `functions.rsx` (`<GlobalFunctions>`) holds the queries, `.positions.json` the layout, frames are children of `<App>`. Every script still handles it; `scaffold_app.py --single-page` creates one.
 
 ## A2. The Silent Import Model
 
@@ -87,12 +112,13 @@ still carries it.
 | Script | Purpose | When to use |
 |--------|---------|-------------|
 | `validate_app.py <dir>` | Validate against all import rules | **ALWAYS** before zipping. Catches import-breaking errors. |
-| `scaffold_app.py "Name" --template <type>` | Create app from template. Types: `minimal`, `crud`, `master-detail`, `search-filter`, `chat`, `advanced-crud` | Start here for **NEW** apps. |
-| `list_components.py <dir>` | Show component tree | Start here for **EDIT/IMPROVE**. Understand the app without reading RSX. |
-| `add_component.py <dir> --type T --id I ...` | Add component + update positions | Add components with correct layout math. |
-| `add_query.py <dir> --type T --id I ...` | Add query with event chains | Add queries with proper attributes and events. |
-| `extract_component.py <dir> --component ID` | Move subtree to src/ file | When main.rsx gets too large. |
-| `fix_positions.py <dir> [--apply] [--scope S] [--shift-from N --by M]` | Recalculate vertical layout. **Dry-run by default** (add `--apply` to persist). Use `--shift-from` for the "I just inserted content, shift rows below" case. | Fix layout after adding/removing components. |
+| `scaffold_app.py "Name" --template <type> [--single-page]` | Create app from template. Types: `minimal`, `crud`, `master-detail`, `search-filter`, `chat`, `advanced-crud`. Multi-page (one page, `page1`) unless `--single-page`. | Start here for **NEW** apps. |
+| `add_page.py <dir> --id P [--title T] [--url-slug S]` | Add a page: `src/P.rsx` `<Screen>` + its positions file + the `main.rsx` Include | Multi-page apps, any time a new page is needed. |
+| `list_components.py <dir>` | Show component tree (pages show as `Screen` nodes) | Start here for **EDIT/IMPROVE**. Understand the app without reading RSX. |
+| `add_component.py <dir> --type T --id I [--screen P] ...` | Add component + update the right positions file | Add components with correct layout math. The page comes from where `--after`/`--before`/`--parent-frame` lives; `--screen P` alone targets page P's main frame. |
+| `add_query.py <dir> --type T --id I [--screen P] ...` | Add query with event chains | Into page P's `<Screen>` (or the only page); `functions.rsx` in a single-page app. |
+| `extract_component.py <dir> --component ID` | Move subtree to src/ file | When a page file (or main.rsx) gets too large. |
+| `fix_positions.py <dir> [--apply] [--screen P] [--scope S] [--shift-from N --by M]` | Recalculate vertical layout, each page file on its own. **Dry-run by default** (add `--apply` to persist). Use `--shift-from` for the "I just inserted content, shift rows below" case. | Fix layout after adding/removing components. |
 | `zip_app.sh <dir>` | Zip for Retool import (runs validate) | Final step — produces the importable zip. |
 | `bundle-apps.sh <app-dir> [output]` | Bundle app into single `.toolscript-bundle` file (dev tool) | Skill development: feed full app context to LLM. `--all` for batch. |
 | `compact_bundles.py` | Strip positions/metadata and truncate large inline data from bundles (dev tool) | Skill development: reduce bundle size for bulk analysis. |
@@ -134,35 +160,39 @@ Read the template example files from `assets/examples/<name>/` before customizin
    ```bash
    python scripts/scaffold_app.py "App Name" --template <type> --output-dir <path>
    ```
-3. **Note:** Scaffolded apps include mock data fallbacks and a Setup Guide modal so the app is functional on import without a database. See "Mock Data" below.
+3. **Note:** Scaffolded apps include mock data fallbacks and a Setup Guide modal so the app is functional on import without a database. See "Mock Data" below. The output is multi-page (A1): the template's content is page `page1` in `src/page1.rsx`. The examples in `assets/examples/` are stored single-page; the scaffolder converts them.
 4. **Read ALL generated files** to understand the starting point
 5. **Read the closest example** from `assets/examples/` for pattern reference
 6. **Customize:** modify query SQL, component labels/attributes, column definitions, form fields
-7. **Add new components:**
+7. **Add pages** if the app needs more than one (each page gets its own queries, frame and positions file):
    ```bash
-   python scripts/add_component.py <dir> --type TextInput --id searchInput --parent-frame '$main' --after pageTitle --attrs 'label="" placeholder="Search..."' --width 6
+   python scripts/add_page.py <dir> --id settings --title "Settings"
    ```
-7. **Add new queries:**
+8. **Add new components** (the page follows the anchor; `--screen settings` alone targets that page's main frame):
+   ```bash
+   python scripts/add_component.py <dir> --type TextInput --id searchInput --after pageTitle --attrs 'label="" placeholder="Search..."' --width 6
+   ```
+9. **Add new queries** (`--screen` picks the page once there is more than one):
    ```bash
    python scripts/add_query.py <dir> --type SELECT --id selectItems --table items --sql-file
    ```
-8. **Extract if main.rsx is large:**
-   ```bash
-   python scripts/extract_component.py <dir> --component editModal
-   ```
-9. **Fix positions if needed** (dry-run first to preview the diff, then apply):
-   ```bash
-   # Preview what would change (no writes)
-   python scripts/fix_positions.py <dir>
-   # Persist the changes
-   python scripts/fix_positions.py <dir> --apply
-   ```
-10. **Validate:**
+10. **Extract if a page file is large:**
+    ```bash
+    python scripts/extract_component.py <dir> --component editModal
+    ```
+11. **Fix positions if needed** (dry-run first to preview the diff, then apply):
+    ```bash
+    # Preview what would change (no writes)
+    python scripts/fix_positions.py <dir>
+    # Persist the changes
+    python scripts/fix_positions.py <dir> --apply
+    ```
+12. **Validate:**
     ```bash
     python scripts/validate_app.py <dir>
     ```
     Fix ALL failures before proceeding.
-11. **Zip:**
+13. **Zip:**
     ```bash
     bash scripts/zip_app.sh <dir>
     ```
@@ -207,7 +237,7 @@ Read the template example files from `assets/examples/<name>/` before customizin
    ```bash
    python scripts/list_components.py <dir>
    ```
-2. **Read functions.rsx** fully to understand query patterns
+2. **Read the queries** fully to understand query patterns: inside each page's `<Screen>` (`src/<page>.rsx`), or `functions.rsx` in a single-page app
 3. **Audit against checklist:**
    - [ ] Destructive queries (DELETE) have `requireConfirmation={true}`?
    - [ ] Mutation queries have success events that refresh data?
@@ -218,7 +248,8 @@ Read the template example files from `assets/examples/<name>/` before customizin
    - [ ] Could filtering use client-side `setFilterStack()` instead of SQL WHERE?
    - [ ] Are State variables used for UI mode flags (bulk update, editing state)?
    - [ ] Does the app have proper event chains (mutate → refresh → UI update)?
-   - [ ] Are ModalFrame/SplitPaneFrame/DrawerFrame/SidebarFrame children of App (not Frame)?
+   - [ ] Are ModalFrame/SplitPaneFrame/DrawerFrame/SidebarFrame children of their page's `<Screen>` (single-page: `<App>`), not of a Frame?
+   - [ ] Multi-page: no page reads another page's components or queries (validator WARNs "Cross-page references")?
    - [ ] PlotlyChart data/layout stored in lib/ JSON files (not inline)?
    - [ ] HTML/IFrame components sanitize user-provided content?
    - [ ] Panes/single-row mutations on a *filtered* table read a State snapshot set on row-select, not `table.selectedRow` (which empties when the row leaves the filter)?
@@ -235,14 +266,14 @@ Read the template example files from `assets/examples/<name>/` before customizin
 For when scripts aren't sufficient — the critical rules to follow:
 
 ### Nesting
-- ModalFrame/SplitPaneFrame/DrawerFrame must be children of `<App>` (not `<Frame>`)
+- ModalFrame/SplitPaneFrame/DrawerFrame must be children of their page's `<Screen>` (single-page: `<App>`), not `<Frame>`
 - Form requires `<Header>` + `<Body>` + `<Footer>` (all three; use `showHeader={false}` to hide)
 - Container requires at least one `<View>` direct child (not inside Body)
 - Table requires at least one `<Column>` child
 - **Never use `enableFullBleed={true}` on Containers inside SplitPaneFrame/DrawerFrame** — causes overflow
 
 ### Positioning
-- Every visible component needs a `.positions.json` entry
+- Every visible component needs a position entry, in its page's `.positions/.<page>.positions.json` (outside every page: `.global_positions.json`; single-page: `.positions.json`)
 - Omit `row` and `col` when they are 0 (zero is the default)
 - View is transparent — no position entry ever
 - `col + width <= 12`
@@ -284,7 +315,7 @@ Scaffolded apps (crud, master-detail, search-filter, advanced-crud) include inli
 **How it works:** `data="{{ Array.isArray(query.data) ? query.data : [{ id: 1, name: 'Example' }] }}"` — when the query has no resource, `query.data` returns an error object (not an array), so the fallback is used. When a real DB returns data (an array), the ternary uses it directly.
 
 **To connect your real database:**
-1. Update `resourceName` in each query in `functions.rsx` to your database resource UUID
+1. Update `resourceName` in each query (inside the page's `<Screen>`; `functions.rsx` in a single-page app) to your database resource UUID
 2. Remove the mock data fallbacks from Table/Select `data` attributes (change `{{ Array.isArray(query.data) ? query.data : [...] }}` to `{{ query.data }}`)
 3. Delete the Setup Guide modal (`setupGuideModal` ModalFrame) and the `setupGuideBtn` button
 
@@ -292,7 +323,52 @@ For deeper reference: read `references/TOOLSCRIPT-CHEATSHEET.md` or the full spe
 
 ## I. Quick Templates
 
-### main.rsx skeleton
+### Multi-page skeleton (default)
+`main.rsx`:
+```jsx
+<App>
+  <Include src="./src/page1.rsx" />
+</App>
+```
+`src/page1.rsx` (queries and State go inside the Screen, `include()` paths are `../lib/…`):
+```jsx
+<Screen id="page1" _customShortcuts={[]} _hashParams={[]} _order={0} _searchParams={[]}
+  browserTitle="App Title" title="App Title" urlSlug="" uuid="<uuid4>">
+  <SqlQueryUnified id="selectItems" query={include("../lib/selectItems.sql", "string")}
+    resourceName="REPLACE_WITH_RESOURCE_UUID" resourceTypeOverride="" warningCodes={[]} />
+  <Frame id="$main" type="main" padding="8px 12px" paddingType="normal" sticky={false}
+    isHiddenOnDesktop={false} isHiddenOnMobile={false}>
+    <Text id="pageTitle" value="### App Title" verticalAlign="center" marginType="normal" />
+  </Frame>
+</Screen>
+```
+`.positions/.page1.positions.json`:
+```json
+{
+  "pageTitle": { "height": 0.6, "width": 12 }
+}
+```
+`metadata.json`: the template below plus `"rootScreen": "page1"` inside `appTemplate`.
+
+### Page navigation (global header, from a real export)
+A `$header` frame included from `main.rsx` outside every Screen is global: it shows on every page. Its components go in `.positions/.global_positions.json`, and a component directly in the header frame carries `"subcontainer": "header"` there.
+```jsx
+<Frame id="$header" type="header" isHiddenOnDesktop={false} isHiddenOnMobile={true}
+  padding="8px 12px" paddingType="normal" sticky={true}>
+  <Navigation id="pageNav" data="{{ retoolContext.pages }}"
+    highlightByIndex="{{ retoolContext.currentPage === item.id }}"
+    labels="{{ item.title || item.id }}" retoolFileObject={{}}>
+    <Event id="a1b2c3d4" event="click" method="openPage"
+      params={{ map: { pageName: "{{ item.id }}" } }} pluginId="" type="util"
+      waitMs="0" waitType="debounce" />
+  </Navigation>
+</Frame>
+```
+```json
+{ "pageNav": { "subcontainer": "header", "height": 0.8, "width": 12 } }
+```
+
+### Single-page skeleton (legacy)
 ```jsx
 <App>
   <Include src="./functions.rsx" />
@@ -303,7 +379,7 @@ For deeper reference: read `references/TOOLSCRIPT-CHEATSHEET.md` or the full spe
 </App>
 ```
 
-### functions.rsx skeleton
+`functions.rsx`:
 ```jsx
 <GlobalFunctions>
 </GlobalFunctions>
@@ -325,7 +401,7 @@ For deeper reference: read `references/TOOLSCRIPT-CHEATSHEET.md` or the full spe
 }
 ```
 
-### .positions.json minimal
+### .positions.json minimal (single-page)
 ```json
 {
   "pageTitle": { "row": 0, "height": 0.6, "width": 12 }

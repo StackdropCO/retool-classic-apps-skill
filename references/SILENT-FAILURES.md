@@ -97,6 +97,16 @@ do not burn time re-suspecting them:
 - Raw `&` and other non-ASCII (`’`, `·`, `—`) in attribute values
 - `<` / `>` comparison signs inside `_comment` text
 
+## Awaiting import proof
+
+- **The hand-built multi-page layout** — what `scaffold_app.py` (default) and
+  `add_page.py` write: a `.positions/` directory built by a script, the template
+  `metadata.json` keys plus `rootScreen`, a scripted `<Screen>` with `urlSlug=""`,
+  queries after the `$main` Frame inside the Screen. Every piece copies a real export
+  (expert-directory, an empty multi-page export), but no scripted app has been
+  imported yet. If one no-ops, bisect starting with `.positions/` and `metadata.json`
+  against a real multi-page export.
+
 ## Debugging a new unknown killer: the bisection method
 
 When an import no-ops and the validator is green, a new killer exists. The

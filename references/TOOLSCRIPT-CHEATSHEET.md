@@ -6,6 +6,27 @@ Condensed reference for generating importable Retool apps. For full details, see
 
 ## 1. Directory Structure
 
+**Multi-page (the default, Retool's current shape):**
+```
+app-name/
+├── metadata.json         # App metadata, with appTemplate.rootScreen (REQUIRED)
+├── main.rsx              # <App> — one <Include> per page, + global frames (REQUIRED)
+├── src/
+│   ├── page1.rsx         # <Screen id="page1"> — the page's queries, State, $main Frame,
+│   │                     #   ModalFrame/DrawerFrame (direct children of the Screen)
+│   └── componentName.rsx # included from a page: <Include src="./componentName.rsx" />
+├── lib/                  # SQL/JS/CSS, included from src/ as ../lib/queryName.sql
+└── .positions/
+    ├── .page1.positions.json    # layout of page1's components only
+    └── .global_positions.json   # components outside every Screen (a $header frame)
+```
+
+Page scope: a page cannot reference another page's components or queries, and global
+code cannot reference page objects. Frame ids are unique across the app (`$main`,
+`$main2`, ...). An empty page has no positions file. `add_page.py` adds a page;
+`add_component.py`, `add_query.py` and `fix_positions.py` take `--screen <page>`.
+
+**Single-page (legacy, still supported):**
 ```
 app-name/
 ├── .positions.json       # Component layout (REQUIRED)
@@ -51,20 +72,21 @@ app-name/
 
 | Parent | Valid Direct Children |
 |--------|---------------------|
-| `<App>` | `Include`, `Frame`, `SidebarFrame`, `SplitPaneFrame`, `DrawerFrame`, `ModalFrame`, `AppStyles`, `DocumentTitle`, `UrlFragments` |
+| `<App>` | `Include` (multi-page: one per `Screen`), `Screen`, `Frame`, `SidebarFrame`, `SplitPaneFrame`, `DrawerFrame`, `ModalFrame`, `AppStyles`, `DocumentTitle`, `UrlFragments` |
 | `<Frame>` | Any visible component, `Include`, `Modal` |
 | `<Container>` | `Header`, `View` (**must have ≥1 View**) |
 | `<View>` | Any visible component |
 | `<Form>` | `Header`, `Body`, `Footer` (**must have all three**), `Event` |
 | `<Header>` / `<Body>` / `<Footer>` | Any visible component |
 | `<Modal>` | `Form`, or any visible component |
-| `<ModalFrame>` | `Header`, `Body` (**must be child of App, NOT Frame**) |
-| `<DrawerFrame>` | `Header`, `Body` (**must be child of App, NOT Frame**) |
-| `<SplitPaneFrame>` | `Form`, or any visible component (**must be child of App, NOT Frame**) |
+| `<ModalFrame>` | `Header`, `Body` (**must be child of its page's Screen, or App in a single-page app — NOT Frame**) |
+| `<DrawerFrame>` | `Header`, `Body` (**must be child of its page's Screen, or App in a single-page app — NOT Frame**) |
+| `<SplitPaneFrame>` | `Form`, or any visible component (**must be child of its page's Screen, or App in a single-page app — NOT Frame**) |
 | `<Table>` | `Column` (**must have ≥1**), `Action`, `ToolbarButton`, `Event`, `Include` |
 | `<Select>` / `<Multiselect>` | `Option`, `Event` |
 | `<Button>` / `<Action>` / `<ToolbarButton>` | `Event` |
-| `<SidebarFrame>` | `Header`, `Body`, `Footer` (**must be child of App, NOT Frame**) |
+| `<SidebarFrame>` | `Header`, `Body`, `Footer` (**must be child of its page's Screen, or App in a single-page app — NOT Frame**) |
+| `<Screen>` (a page) | `Frame` (one `type="main"`), `ModalFrame`, `DrawerFrame`, `SplitPaneFrame`, `SidebarFrame`, `Include`, `AppStyles`, plus everything `<GlobalFunctions>` takes |
 | `<GlobalFunctions>` | `Folder`, `SqlQueryUnified`, `SqlQuery`, `RESTQuery`, `JavascriptQuery`, `GraphQLQuery`, `FirebaseQuery`, `RetoolTableQuery`, `SlackQuery`, `S3Query`, `OpenAPIQuery`, `SqlTransformQuery`, `State`, `Function` |
 
 **Leaf nodes** (no children): `Column`, `Option`, `Property`, `Event`, `Include`, `Text`, `TextInput`, `TextArea`, `Image`, `Date`, `Slider`, `Switch`, `Checkbox`, `NumberInput`, `Statistic`, `Divider`, `Spacer`, `State`, `Chat`, `Alert`, `HTML`, `IFrame`, `Map`, `BoundingBox`, `PlotlyChart`, `S3Uploader`, `CustomComponent`.
@@ -181,14 +203,14 @@ Omit `row` and `col` when they are 0 — Retool treats these as defaults:
 
 These 9 rules cause "Failed import" errors if violated:
 
-1. **ModalFrame/SplitPaneFrame/DrawerFrame must be under `<App>`**, not `<Frame>`
+1. **ModalFrame/SplitPaneFrame/DrawerFrame must be under their page's `<Screen>`** (single-page: `<App>`), not `<Frame>`
 2. **Form requires Header + Body + Footer** (all three — use `showHeader={false}` to hide)
 3. **Container requires ≥1 View** child (direct, not inside Body)
 4. **View is transparent** in .positions.json — no position entry ever
 5. **No XML comments** `<!-- -->` in any .rsx file (use `_comment` attribute)
-6. **Every visible component needs a position entry** in .positions.json
+6. **Every visible component needs a position entry** in its page's `.positions/.<page>.positions.json` (single-page: .positions.json)
 7. **col + width ≤ 12** for every position entry
-8. **4 required files**: main.rsx, functions.rsx, metadata.json, .positions.json
+8. **Required files**: main.rsx + metadata.json (with `rootScreen`) + one `<Screen>` per page; single-page: main.rsx, functions.rsx, metadata.json, .positions.json
 9. **All IDs globally unique**; hex formats must be exact (5-char/8-char)
 
 ---
